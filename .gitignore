@@ -1,0 +1,11 @@
+# Reference media and generated place exports are kept local.
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.avi
+*.mp4
+*.rbxlx
+
+# Studio lock file.
+*.rbxl.lock
