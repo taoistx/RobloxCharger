@@ -30,7 +30,6 @@ type PlayerGroup = {
 type KnockbackVisual = {
 	root: VisualRoot,
 	owner: Player,
-	referenceCFrame: CFrame,
 	startPosition: Vector3,
 	startRotation: CFrame,
 	peakPosition: Vector3,
@@ -48,9 +47,9 @@ local FOLLOWER_STATE = GameplayConfig.FollowerStates
 
 -- 三角队形参数：第 1 排 2 个、第 2 排 3 个、第 3 排 4 个，以此类推。
 local FORMATION_HORIZONTAL_SPACING = 1.8 -- 同一排小兵之间的横向间距。
-local FORMATION_FIRST_ROW_DISTANCE = 1 -- 第一排位于玩家身后的距离。
-local FORMATION_ROW_SPACING = 1 -- 每增加一排，向后增加的距离。
-local FORMATION_HEIGHT_OFFSET = -2.45 -- 小兵相对 HumanoidRootPart 的高度偏移。
+local FORMATION_FIRST_ROW_DISTANCE = 1.2-- 第一排位于玩家身后的距离。
+local FORMATION_ROW_SPACING = 1.2 -- 每增加一排，向后增加的距离。
+local FORMATION_FOOT_CLEARANCE = 0.05 -- 小兵 Pivot 相对玩家脚底的微小抬高，避免视觉穿插。
 
 -- 同步位移、延迟姿态参数：小兵的水平位置始终跟随玩家，不会因跑动拉开距离。
 -- 每一排只读取更早的高度与朝向，因此跳跃和转弯仍会逐排传递。
@@ -60,7 +59,7 @@ local PATH_HISTORY_SECONDS = 4 -- 保存玩家最近多少秒的路径。
 
 -- 小兵撞飞参数：全部只影响本机表现，可以直接修改后重开 Play 测试。
 local KNOCKBACK_DIRECTION_RANDOM_ANGLE = 18 -- 围绕“远离玩家”的方向随机偏转的最大角度（度）。
-local KNOCKBACK_PEAK_HEIGHT_MIN = 2 -- 最高点的最小高度。
+local KNOCKBACK_PEAK_HEIGHT_MIN = 6 -- 最高点的最小高度。
 local KNOCKBACK_PEAK_HEIGHT_RANDOM = 1.8 -- 最高点额外随机的高度。
 local KNOCKBACK_PEAK_DISTANCE_MIN = 1.6 -- 飞到最高点前，向外移动的最小距离。
 local KNOCKBACK_PEAK_DISTANCE_RANDOM = 1.6 -- 飞到最高点前，额外随机的向外距离。
@@ -116,18 +115,11 @@ local function getParts(root: VisualRoot): { BasePart }
 end
 
 local function getPivot(root: VisualRoot): CFrame
-	if root:IsA("BasePart") then
-		return root.CFrame
-	end
 	return root:GetPivot()
 end
 
 local function pivotTo(root: VisualRoot, cframe: CFrame)
-	if root:IsA("BasePart") then
-		root.CFrame = cframe
-	else
-		root:PivotTo(cframe)
-	end
+	root:PivotTo(cframe)
 end
 
 local function getCharacterRoot(player: Player): BasePart?
@@ -138,6 +130,14 @@ local function getCharacterRoot(player: Player): BasePart?
 	local root = character:FindFirstChild("HumanoidRootPart")
 	return if root ~= nil and root:IsA("BasePart") then root else nil
 end
+local function getCharacterHumanoid(player: Player): Humanoid?
+	local character = player.Character
+	if character == nil then
+		return nil
+	end
+	return character:FindFirstChildOfClass("Humanoid")
+end
+
 
 local function getGroup(player: Player): PlayerGroup
 	local group = groupsByPlayer[player]
@@ -245,27 +245,26 @@ local function startKnockback(follower: VisualFollower)
 
 	local worldStart = getPivot(follower.root)
 	local playerRoot = getCharacterRoot(follower.owner)
-	local referenceCFrame = if playerRoot ~= nil then playerRoot.CFrame else CFrame.new(worldStart.Position)
-	local startLocalCFrame = referenceCFrame:ToObjectSpace(worldStart)
-	local startPosition = startLocalCFrame.Position
-	local direction = getOutwardDirection(startPosition, follower.order)
+	local impactReference = if playerRoot ~= nil then playerRoot.CFrame else CFrame.new(worldStart.Position)
+	local startLocalPosition = impactReference:PointToObjectSpace(worldStart.Position)
+	local direction = getOutwardDirection(startLocalPosition, follower.order)
 	-- 让倒下后的身体朝向远离玩家的方向，而不是所有小兵都平行躺倒。
 	local outwardYaw = math.atan2(direction.X, direction.Z) + math.rad((math.random() * 2 - 1) * KNOCKBACK_OUTWARD_YAW_RANDOM)
 	local peakDistance = KNOCKBACK_PEAK_DISTANCE_MIN + math.random() * KNOCKBACK_PEAK_DISTANCE_RANDOM
 	local landingDistance = KNOCKBACK_LANDING_DISTANCE_MIN + math.random() * KNOCKBACK_LANDING_DISTANCE_RANDOM
-	local peakPosition = startPosition + direction * peakDistance + Vector3.new(0, KNOCKBACK_PEAK_HEIGHT_MIN + math.random() * KNOCKBACK_PEAK_HEIGHT_RANDOM, 0)
-	local landingPosition = startPosition + direction * landingDistance + Vector3.new(0, KNOCKBACK_LANDING_HEIGHT_MIN + math.random() * KNOCKBACK_LANDING_HEIGHT_RANDOM, 0)
-	peakPosition = Vector3.new(peakPosition.X, peakPosition.Y, math.min(peakPosition.Z, KNOCKBACK_PEAK_BACK_CAP))
-	landingPosition = Vector3.new(landingPosition.X, landingPosition.Y, math.min(landingPosition.Z, KNOCKBACK_LANDING_BACK_CAP))
+	local peakLocalPosition = startLocalPosition + direction * peakDistance + Vector3.new(0, KNOCKBACK_PEAK_HEIGHT_MIN + math.random() * KNOCKBACK_PEAK_HEIGHT_RANDOM, 0)
+	local landingLocalPosition = startLocalPosition + direction * landingDistance + Vector3.new(0, KNOCKBACK_LANDING_HEIGHT_MIN + math.random() * KNOCKBACK_LANDING_HEIGHT_RANDOM, 0)
+	peakLocalPosition = Vector3.new(peakLocalPosition.X, peakLocalPosition.Y, math.min(peakLocalPosition.Z, KNOCKBACK_PEAK_BACK_CAP))
+	landingLocalPosition = Vector3.new(landingLocalPosition.X, landingLocalPosition.Y, math.min(landingLocalPosition.Z, KNOCKBACK_LANDING_BACK_CAP))
 
 	table.insert(knockbackVisuals, {
 		root = follower.root,
 		owner = follower.owner,
-		referenceCFrame = referenceCFrame,
-		startPosition = startPosition,
-		startRotation = startLocalCFrame - startLocalCFrame.Position,
-		peakPosition = peakPosition,
-		landingPosition = landingPosition,
+		-- 轨迹在撞击瞬间转换到世界坐标；之后不再受角色与镜头位置变化影响。
+		startPosition = worldStart.Position,
+		startRotation = worldStart - worldStart.Position,
+		peakPosition = impactReference:PointToWorldSpace(peakLocalPosition),
+		landingPosition = impactReference:PointToWorldSpace(landingLocalPosition),
 		riseDuration = KNOCKBACK_RISE_TIME_MIN + math.random() * KNOCKBACK_RISE_TIME_RANDOM,
 		fallDuration = KNOCKBACK_FALL_TIME_MIN + math.random() * KNOCKBACK_FALL_TIME_RANDOM,
 		elapsed = 0,
@@ -363,7 +362,8 @@ local function updateFormation(deltaTime: number, now: number)
 		end
 
 		local root = getCharacterRoot(player)
-		if root == nil then
+		local humanoid = getCharacterHumanoid(player)
+		if root == nil or humanoid == nil then
 			continue
 		end
 		if group.lastRoot ~= root then
@@ -382,9 +382,10 @@ local function updateFormation(deltaTime: number, now: number)
 			local delayedCFrame = sampleHistory(group.history, now - row * FOLLOW_DELAY_PER_ROW)
 			if delayedCFrame ~= nil then
 				-- 水平位移使用当前玩家位置，保证小兵速度与玩家完全同步；
-				-- 只有高度与旋转读取延迟路径，让队形保留逐排传递的动态。
-				local synchronizedBase = CFrame.new(root.Position.X, delayedCFrame.Position.Y, root.Position.Z) * (delayedCFrame - delayedCFrame.Position)
-				local targetCFrame = synchronizedBase * CFrame.new(x, FORMATION_HEIGHT_OFFSET, z)
+				-- 高度与旋转读取延迟路径。小兵模板 Pivot 约定为脚底，因此使用角色脚底高度。
+				local footHeight = delayedCFrame.Position.Y - root.Size.Y / 2 - humanoid.HipHeight + FORMATION_FOOT_CLEARANCE
+				local synchronizedBase = CFrame.new(root.Position.X, footHeight, root.Position.Z) * (delayedCFrame - delayedCFrame.Position)
+				local targetCFrame = synchronizedBase * CFrame.new(x, 0, z)
 				local currentRotation = follower.currentCFrame - follower.currentCFrame.Position
 				local targetRotation = targetCFrame - targetCFrame.Position
 				follower.currentCFrame = CFrame.new(targetCFrame.Position) * currentRotation:Lerp(targetRotation, orientationAlpha)
@@ -413,15 +414,11 @@ local function updateKnockbacks(deltaTime: number)
 			progress = 0.5 + eased * 0.5
 		end
 
-		local playerRoot = getCharacterRoot(effect.owner)
-		if playerRoot ~= nil then
-			effect.referenceCFrame = playerRoot.CFrame
-		end
 		-- 先朝远离玩家的方向偏转，再向后翻倒 90°，最后加入小幅侧倾。
 		local rotation = effect.startRotation
 			* CFrame.Angles(0, effect.outwardYaw * progress, 0)
 			* CFrame.Angles(effect.backwardTilt * progress, 0, effect.sideRoll * progress)
-		pivotTo(effect.root, effect.referenceCFrame * CFrame.new(position) * rotation)
+		pivotTo(effect.root, CFrame.new(position) * rotation)
 
 		local fade = math.clamp((effect.elapsed / totalDuration - 0.72) / 0.28, 0, 1)
 		for _, part in getParts(effect.root) do

@@ -3,7 +3,7 @@
 --[[
 	Owns player energy and `GameZone` areas.
 	GameZone tag: BasePart or Model (a Model must contain a BasePart).
-	Required attributes: none.
+	Required attributes: ZoneIndex: integer in the range 0..1,000,000.
 	Optional attributes: none.
 	The tagged object's bounding box is the playable charging area.
 ]]
@@ -30,7 +30,7 @@ local PlayerEnergyService = {}
 local TAG = GameplayConfig.Tags.GameZone
 local ATTRIBUTE = GameplayConfig.Attributes
 local states: { [Player]: PlayerState } = {}
-local zones: { [Instance]: boolean } = {}
+local zones: { [Instance]: number } = {}
 local started = false
 
 local function getLevel(player: Player): number
@@ -84,13 +84,25 @@ local function isPointInsideZone(zone: Instance, point: Vector3): boolean
 		and math.abs(localPoint.Z) <= boxSize.Z * 0.5
 end
 
-local function isInAnyZone(point: Vector3): boolean
-	for zone in zones do
+local function getZoneIndex(zone: Instance): number?
+	local zoneIndex = zone:GetAttribute(ATTRIBUTE.ZoneIndex)
+	if typeof(zoneIndex) ~= "number"
+		or zoneIndex ~= math.floor(zoneIndex)
+		or zoneIndex < 0
+		or zoneIndex > GameplayConfig.Limits.MaxGameZoneIndex
+	then
+		return nil
+	end
+	return zoneIndex
+end
+
+local function getZoneIndexAtPoint(point: Vector3): number?
+	for zone, zoneIndex in zones do
 		if zone:IsDescendantOf(game) and isPointInsideZone(zone, point) then
-			return true
+			return zoneIndex
 		end
 	end
-	return false
+	return nil
 end
 
 local function clearCharacterState(state: PlayerState)
@@ -124,9 +136,12 @@ local function onCharacterAdded(player: Player, character: Model)
 	state.lastPosition = rootPart.Position
 	PlayerEnergyService.setEnergy(player, 0)
 	player:SetAttribute(ATTRIBUTE.IsInGameZone, false)
+	player:SetAttribute(ATTRIBUTE.CurrentGameZoneIndex, nil)
 	player:SetAttribute(ATTRIBUTE.BossImpactSequence, 0)
 	table.insert(state.characterConnections, humanoid.Died:Connect(function()
 		PlayerEnergyService.setEnergy(player, 0)
+		player:SetAttribute(ATTRIBUTE.IsInGameZone, false)
+		player:SetAttribute(ATTRIBUTE.CurrentGameZoneIndex, nil)
 	end))
 end
 
@@ -148,6 +163,7 @@ local function bindPlayer(player: Player)
 	setCapacity(player)
 	PlayerEnergyService.setEnergy(player, 0)
 	player:SetAttribute(ATTRIBUTE.IsInGameZone, false)
+	player:SetAttribute(ATTRIBUTE.CurrentGameZoneIndex, nil)
 	table.insert(state.playerConnections, player:GetAttributeChangedSignal(ATTRIBUTE.PlayerLevel):Connect(function()
 		local capacity = setCapacity(player)
 		PlayerEnergyService.setEnergy(player, math.min(getEnergy(player), capacity))
@@ -181,7 +197,12 @@ local function bindZone(instance: Instance)
 		warn("[PlayerEnergyService] GameZone must be a BasePart or Model containing a BasePart", instance)
 		return
 	end
-	zones[instance] = true
+	local zoneIndex = getZoneIndex(instance)
+	if zoneIndex == nil then
+		warn("[PlayerEnergyService] GameZone requires ZoneIndex as an integer between 0 and " .. GameplayConfig.Limits.MaxGameZoneIndex, instance)
+		return
+	end
+	zones[instance] = zoneIndex
 end
 
 local function unbindZone(instance: Instance)
@@ -245,8 +266,10 @@ function PlayerEnergyService.start()
 			end
 
 			local position = rootPart.Position
-			local inZone = isInAnyZone(position)
+			local zoneIndex = getZoneIndexAtPoint(position)
+			local inZone = zoneIndex ~= nil
 			player:SetAttribute(ATTRIBUTE.IsInGameZone, inZone)
+			player:SetAttribute(ATTRIBUTE.CurrentGameZoneIndex, zoneIndex)
 			local previousPosition = state.lastPosition
 			state.lastPosition = position
 			if not inZone or previousPosition == nil then

@@ -13,6 +13,9 @@ GameplayConfig.Attributes = {
 	CurrentEnergy = "CurrentEnergy",
 	EnergyCapacity = "EnergyCapacity",
 	IsInGameZone = "IsInGameZone",
+	ZoneIndex = "ZoneIndex",
+	CurrentGameZoneIndex = "CurrentGameZoneIndex",
+	MinionSpawnCount = "MinionSpawnCount",
 	StatusMessage = "StatusMessage",
 	BossImpactSequence = "BossImpactSequence",
 	EnergyValue = "EnergyValue",
@@ -57,6 +60,8 @@ GameplayConfig.Limits = {
 	MaxEnergyValue = 1000000,
 	MaxBossRequiredEnergy = 1000000,
 	MaxRespawnSeconds = 3600,
+	MaxGameZoneIndex = 1000000,
+	MaxMinionsPerGameZone = 1000,
 }
 
 function GameplayConfig.getCapacityForLevel(level: number): number

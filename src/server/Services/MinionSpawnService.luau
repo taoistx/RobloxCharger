@@ -1,13 +1,18 @@
 --!strict
 
 --[[
-	Spawns a player's collectible minions when they enter a `GameZone`.
+	Preloads a player's collectible minions for the next two `GameZone` indices.
+	GameZone tag: BasePart or Model (a Model must contain a BasePart).
+	Required attributes: ZoneIndex: integer in the range 0..1,000,000.
+	Optional attributes: MinionSpawnCount: integer in the range 1..1,000 (default: 10).
+	Entering index N generates minions in N + 1 and N + 2 once per player life.
 
 	Templates: direct children of ServerStorage/MinionTemplates; if that folder is
 	absent, direct children of ServerStorage are accepted for the current scene.
 	Each template must be a BasePart or Model with the `Minion` tag and an
-	EnergyValue: number attribute in the range 1..1,000,000. Template tags are
-	removed at runtime; spawned clones receive the tag instead.
+	EnergyValue: number attribute in the range 1..1,000,000. Its Pivot must be
+	placed at the point that touches the ground. Template tags are removed at
+	runtime; spawned clones receive the tag instead.
 
 	Spawned Minion optional runtime attribute:
 	SpawnOwnerUserId: number. Only this player can collect that instance.
@@ -30,8 +35,8 @@ type ZoneBounds = {
 type PlayerSpawnState = {
 	connections: { RBXScriptConnection },
 	characterDiedConnection: RBXScriptConnection?,
-	folder: Folder?,
-	waveSpawned: boolean,
+	folders: { [number]: Folder },
+	spawnedZoneIndices: { [number]: boolean },
 }
 
 local MinionSpawnService = {}
@@ -103,31 +108,50 @@ local function cacheTemplates()
 	end
 end
 
-local function getZoneBounds(): { ZoneBounds }
-	local zones: { ZoneBounds } = {}
+local function getZoneIndex(instance: Instance): number?
+	local zoneIndex = instance:GetAttribute(ATTRIBUTE.ZoneIndex)
+	if typeof(zoneIndex) ~= "number"
+		or zoneIndex ~= math.floor(zoneIndex)
+		or zoneIndex < 0
+		or zoneIndex > GameplayConfig.Limits.MaxGameZoneIndex
+	then
+		return nil
+	end
+	return zoneIndex
+end
+
+local function getMinionSpawnCount(instance: Instance): number
+	local count = instance:GetAttribute(ATTRIBUTE.MinionSpawnCount)
+	if typeof(count) ~= "number" then
+		return DEFAULT.MinionSpawnCount
+	end
+	if count ~= math.floor(count) or count < 1 or count > GameplayConfig.Limits.MaxMinionsPerGameZone then
+		warn("[MinionSpawnService] GameZone MinionSpawnCount must be an integer between 1 and " .. GameplayConfig.Limits.MaxMinionsPerGameZone, instance)
+		return DEFAULT.MinionSpawnCount
+	end
+	return count
+end
+
+local function getZoneBounds(zoneIndex: number): (ZoneBounds?, number?)
 	for _, instance in CollectionService:GetTagged(TAG.GameZone) do
+		if getZoneIndex(instance) ~= zoneIndex then
+			continue
+		end
 		local root = GameplayUtil.getRoot(instance)
 		if root == nil then
 			warn("[MinionSpawnService] GameZone must be a BasePart or Model containing a BasePart", instance)
 			continue
 		end
+		local spawnCount = getMinionSpawnCount(instance)
 		if root:IsA("BasePart") then
-			table.insert(zones, { cframe = root.CFrame, size = root.Size })
-		else
-			local cframe, size = root:GetBoundingBox()
-			table.insert(zones, { cframe = cframe, size = size })
+			return { cframe = root.CFrame, size = root.Size }, spawnCount
 		end
+		local cframe, size = root:GetBoundingBox()
+		return { cframe = cframe, size = size }, spawnCount
 	end
-	return zones
+	return nil, nil
 end
 
-local function getObjectHeight(root: RootObject): number
-	if root:IsA("BasePart") then
-		return root.Size.Y
-	end
-	local _, size = root:GetBoundingBox()
-	return size.Y
-end
 
 local function isFarEnough(candidate: Vector3, placedPositions: { Vector3 }): boolean
 	for _, position in placedPositions do
@@ -139,21 +163,19 @@ local function isFarEnough(candidate: Vector3, placedPositions: { Vector3 }): bo
 	return true
 end
 
-local function chooseSpawnCFrame(root: RootObject, zones: { ZoneBounds }, placedPositions: { Vector3 }): CFrame?
-	if #zones == 0 then
-		return nil
-	end
-	local objectHeight = getObjectHeight(root)
+local function chooseSpawnCFrame(root: RootObject, zone: ZoneBounds, placedPositions: { Vector3 }): CFrame?
+	local sourcePivot = root:GetPivot()
+	local sourceRotation = sourcePivot - sourcePivot.Position
 	for _ = 1, MAX_POSITION_ATTEMPTS do
-		local zone = zones[math.random(1, #zones)]
 		local halfWidth = math.max(zone.size.X / 2 - SPAWN_EDGE_PADDING, 0)
 		local halfDepth = math.max(zone.size.Z / 2 - SPAWN_EDGE_PADDING, 0)
 		local localPosition = Vector3.new(
 			(math.random() * 2 - 1) * halfWidth,
-			zone.size.Y / 2 + objectHeight / 2 + SPAWN_SURFACE_OFFSET,
+			-- 模板 Pivot 即地面接触点，直接贴到 GameZone 顶面。
+			zone.size.Y / 2 + SPAWN_SURFACE_OFFSET,
 			(math.random() * 2 - 1) * halfDepth
 		)
-		local candidate = zone.cframe * CFrame.new(localPosition)
+		local candidate = zone.cframe * CFrame.new(localPosition) * sourceRotation
 		if isFarEnough(candidate.Position, placedPositions) then
 			return candidate
 		end
@@ -162,42 +184,44 @@ local function chooseSpawnCFrame(root: RootObject, zones: { ZoneBounds }, placed
 end
 
 local function cleanupSpawnedMinions(state: PlayerSpawnState)
-	if state.folder ~= nil and state.folder.Parent ~= nil then
-		state.folder:Destroy()
+	for _, folder in state.folders do
+		if folder.Parent ~= nil then
+			folder:Destroy()
+		end
 	end
-	state.folder = nil
+	table.clear(state.folders)
+	table.clear(state.spawnedZoneIndices)
 end
 
-local function createPlayerFolder(player: Player): Folder
+local function createPlayerFolder(player: Player, zoneIndex: number): Folder
 	local folder = Instance.new("Folder")
-	folder.Name = "Player_" .. player.UserId
+	folder.Name = "Player_" .. player.UserId .. "_Zone_" .. zoneIndex
 	folder:SetAttribute(ATTRIBUTE.SpawnOwnerUserId, player.UserId)
+	folder:SetAttribute(ATTRIBUTE.ZoneIndex, zoneIndex)
 	folder.Parent = getSessionRoot()
 	return folder
 end
 
-local function spawnWave(player: Player)
+local function spawnZone(player: Player, zoneIndex: number)
 	local state = states[player]
-	if state == nil or state.waveSpawned or player:GetAttribute(ATTRIBUTE.IsInGameZone) ~= true then
+	if state == nil or state.spawnedZoneIndices[zoneIndex] then
 		return
 	end
 	if #templates == 0 then
 		return
 	end
 
-	local zones = getZoneBounds()
-	if #zones == 0 then
+	local zone, spawnCount = getZoneBounds(zoneIndex)
+	if zone == nil or spawnCount == nil then
 		return
 	end
 
-	cleanupSpawnedMinions(state)
-	local folder = createPlayerFolder(player)
-	state.folder = folder
-	state.waveSpawned = true
+	local folder = createPlayerFolder(player, zoneIndex)
+	state.folders[zoneIndex] = folder
 	local placedPositions: { Vector3 } = {}
 	local spawnedCount = 0
 
-	for index = 1, DEFAULT.MinionSpawnCount do
+	for index = 1, spawnCount do
 		local template = templates[math.random(1, #templates)]
 		local clone = template:Clone()
 		local root = GameplayUtil.getRoot(clone)
@@ -207,15 +231,14 @@ local function spawnWave(player: Player)
 			continue
 		end
 
-		local spawnCFrame = chooseSpawnCFrame(root, zones, placedPositions)
+		local spawnCFrame = chooseSpawnCFrame(root, zone, placedPositions)
 		if spawnCFrame == nil then
 			clone:Destroy()
 			warn("[MinionSpawnService] unable to find a free Minion spawn position", player)
 			break
 		end
 
-		local sourcePivot = GameplayUtil.getPivot(root)
-		GameplayUtil.pivotTo(root, spawnCFrame * (sourcePivot - sourcePivot.Position))
+		root:PivotTo(spawnCFrame)
 		clone.Name = "Minion_" .. index
 		clone:SetAttribute(ATTRIBUTE.Collected, false)
 		clone:SetAttribute(ATTRIBUTE.SpawnOwnerUserId, player.UserId)
@@ -226,10 +249,17 @@ local function spawnWave(player: Player)
 	end
 
 	if spawnedCount > 0 then
-		player:SetAttribute(ATTRIBUTE.StatusMessage, "小兵小队出现！收集它们来补充能量。")
+		state.spawnedZoneIndices[zoneIndex] = true
+		player:SetAttribute(ATTRIBUTE.StatusMessage, "第 " .. zoneIndex .. " 区的小兵已就绪！")
 	else
-		state.waveSpawned = false
-		cleanupSpawnedMinions(state)
+		folder:Destroy()
+		state.folders[zoneIndex] = nil
+	end
+end
+
+local function preloadUpcomingZones(player: Player, currentZoneIndex: number)
+	for zoneIndex = currentZoneIndex + 1, currentZoneIndex + 2 do
+		spawnZone(player, zoneIndex)
 	end
 end
 
@@ -244,7 +274,6 @@ local function bindCharacterDeath(state: PlayerSpawnState, character: Model)
 	end
 	state.characterDiedConnection = humanoid.Died:Connect(function()
 		cleanupSpawnedMinions(state)
-		state.waveSpawned = false
 	end)
 end
 
@@ -252,16 +281,21 @@ local function bindPlayer(player: Player)
 	if states[player] ~= nil then
 		return
 	end
-	local state: PlayerSpawnState = { connections = {}, characterDiedConnection = nil, folder = nil, waveSpawned = false }
+	local state: PlayerSpawnState = {
+		connections = {},
+		characterDiedConnection = nil,
+		folders = {},
+		spawnedZoneIndices = {},
+	}
 	states[player] = state
-	table.insert(state.connections, player:GetAttributeChangedSignal(ATTRIBUTE.IsInGameZone):Connect(function()
-		if player:GetAttribute(ATTRIBUTE.IsInGameZone) == true then
-			spawnWave(player)
+	table.insert(state.connections, player:GetAttributeChangedSignal(ATTRIBUTE.CurrentGameZoneIndex):Connect(function()
+		local zoneIndex = player:GetAttribute(ATTRIBUTE.CurrentGameZoneIndex)
+		if typeof(zoneIndex) == "number" and zoneIndex == math.floor(zoneIndex) and zoneIndex >= 0 then
+			preloadUpcomingZones(player, zoneIndex)
 		end
 	end))
 	table.insert(state.connections, player.CharacterRemoving:Connect(function()
 		cleanupSpawnedMinions(state)
-		state.waveSpawned = false
 	end))
 	table.insert(state.connections, player.CharacterAdded:Connect(function(character)
 		bindCharacterDeath(state, character)
@@ -269,8 +303,9 @@ local function bindPlayer(player: Player)
 	if player.Character ~= nil then
 		bindCharacterDeath(state, player.Character)
 	end
-	if player:GetAttribute(ATTRIBUTE.IsInGameZone) == true then
-		spawnWave(player)
+	local zoneIndex = player:GetAttribute(ATTRIBUTE.CurrentGameZoneIndex)
+	if typeof(zoneIndex) == "number" and zoneIndex == math.floor(zoneIndex) and zoneIndex >= 0 then
+		preloadUpcomingZones(player, zoneIndex)
 	end
 end
 

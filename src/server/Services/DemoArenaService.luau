@@ -60,6 +60,8 @@ function DemoArenaService.buildIfNeeded()
 	local zone = createPart(arena, "ChargingZone", Vector3.new(86, 1, 40), CFrame.new(0, 0.55, 28), Color3.fromRGB(34, 155, 235))
 	zone.Transparency = 0.32
 	zone.Material = Enum.Material.Neon
+	zone:SetAttribute(ATTRIBUTE.ZoneIndex, 0)
+	zone:SetAttribute(ATTRIBUTE.MinionSpawnCount, GameplayConfig.Defaults.MinionSpawnCount)
 	CollectionService:AddTag(zone, TAG.GameZone)
 	addWorldLabel(zone, "冲刺充能区：持续跑动来累积能量", Color3.fromRGB(190, 240, 255))
 
