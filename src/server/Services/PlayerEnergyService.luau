@@ -15,6 +15,7 @@ local CollectionService = game:GetService("CollectionService")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 local GameplayUtil = require(script.Parent:WaitForChild("GameplayUtil"))
+local PlayerProgressionService = require(script.Parent:WaitForChild("PlayerProgressionService"))
 
 type PlayerState = {
 	character: Model?,
@@ -280,6 +281,7 @@ function PlayerEnergyService.start()
 			local isRunning = humanoid.MoveDirection.Magnitude >= 0.05 and distance > 0.01
 			if isRunning then
 				PlayerEnergyService.addEnergy(player, distance * GameplayConfig.Defaults.EnergyPerStud)
+				PlayerProgressionService.addRunningDistance(player, distance)
 			else
 				PlayerEnergyService.spendEnergy(player, GameplayConfig.Defaults.IdleEnergyDrainPerSecond * deltaTime)
 			end

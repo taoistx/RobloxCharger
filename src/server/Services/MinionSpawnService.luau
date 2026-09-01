@@ -1,11 +1,12 @@
 --!strict
 
 --[[
-	Preloads a player's collectible minions for the next two `GameZone` indices.
+	Spawns a player's collectible minions for the active `GameZone` and preloads
+	the next two `GameZone` indices.
 	GameZone tag: BasePart or Model (a Model must contain a BasePart).
 	Required attributes: ZoneIndex: integer in the range 0..1,000,000.
 	Optional attributes: MinionSpawnCount: integer in the range 1..1,000 (default: 10).
-	Entering index N generates minions in N + 1 and N + 2 once per player life.
+	Entering index N generates minions in N, N + 1, and N + 2 once per player life.
 
 	Templates: direct children of ServerStorage/MinionTemplates; if that folder is
 	absent, direct children of ServerStorage are accepted for the current scene.
@@ -257,8 +258,8 @@ local function spawnZone(player: Player, zoneIndex: number)
 	end
 end
 
-local function preloadUpcomingZones(player: Player, currentZoneIndex: number)
-	for zoneIndex = currentZoneIndex + 1, currentZoneIndex + 2 do
+local function preloadActiveAndUpcomingZones(player: Player, currentZoneIndex: number)
+	for zoneIndex = currentZoneIndex, currentZoneIndex + 2 do
 		spawnZone(player, zoneIndex)
 	end
 end
@@ -291,7 +292,7 @@ local function bindPlayer(player: Player)
 	table.insert(state.connections, player:GetAttributeChangedSignal(ATTRIBUTE.CurrentGameZoneIndex):Connect(function()
 		local zoneIndex = player:GetAttribute(ATTRIBUTE.CurrentGameZoneIndex)
 		if typeof(zoneIndex) == "number" and zoneIndex == math.floor(zoneIndex) and zoneIndex >= 0 then
-			preloadUpcomingZones(player, zoneIndex)
+			preloadActiveAndUpcomingZones(player, zoneIndex)
 		end
 	end))
 	table.insert(state.connections, player.CharacterRemoving:Connect(function()
@@ -305,7 +306,7 @@ local function bindPlayer(player: Player)
 	end
 	local zoneIndex = player:GetAttribute(ATTRIBUTE.CurrentGameZoneIndex)
 	if typeof(zoneIndex) == "number" and zoneIndex == math.floor(zoneIndex) and zoneIndex >= 0 then
-		preloadUpcomingZones(player, zoneIndex)
+		preloadActiveAndUpcomingZones(player, zoneIndex)
 	end
 end
 
