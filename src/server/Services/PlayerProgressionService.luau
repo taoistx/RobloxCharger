@@ -36,8 +36,30 @@ local ATTRIBUTE = GameplayConfig.Attributes
 local PROGRESSION = GameplayConfig.Progression
 local states: { [Player]: PlayerState } = {}
 local started = false
-local progressionStore = DataStoreService:GetDataStore(PROGRESSION.DataStoreName)
+local progressionStore: GlobalDataStore? = nil
+local nextStoreRetryAt = 0
 local feedbackEvent: RemoteEvent? = nil
+
+local function getProgressionStore(): GlobalDataStore?
+	if progressionStore ~= nil then
+		return progressionStore
+	end
+	if os.clock() < nextStoreRetryAt then
+		return nil
+	end
+
+	local success, storeOrError = pcall(function()
+		return DataStoreService:GetDataStore(PROGRESSION.DataStoreName)
+	end)
+	if not success then
+		nextStoreRetryAt = os.clock() + 30
+		warn("[PlayerProgressionService] progression storage is unavailable: " .. tostring(storeOrError))
+		return nil
+	end
+
+	progressionStore = storeOrError :: GlobalDataStore
+	return progressionStore
+end
 
 local function getFeedbackEvent(): RemoteEvent
 	if feedbackEvent ~= nil and feedbackEvent.Parent ~= nil then
@@ -145,6 +167,11 @@ local function savePlayer(player: Player): boolean
 
 	state.saving = true
 	local savedRevision = state.revision
+	local store = getProgressionStore()
+	if store == nil then
+		state.saving = false
+		return false
+	end
 	local payload: SavedProgression = {
 		version = 1,
 		level = state.level,
@@ -152,7 +179,7 @@ local function savePlayer(player: Player): boolean
 		distanceRemainder = state.distanceRemainder,
 	}
 	local success, err = pcall(function()
-		progressionStore:SetAsync(tostring(player.UserId), payload)
+		store:SetAsync(tostring(player.UserId), payload)
 	end)
 	state.saving = false
 	if not success then
@@ -171,15 +198,20 @@ local function loadPlayer(player: Player)
 		return
 	end
 
-	local success, savedOrError = pcall(function()
-		return progressionStore:GetAsync(tostring(player.UserId))
-	end)
+	local store = getProgressionStore()
+	local success = false
+	local savedOrError: unknown = nil
+	if store ~= nil then
+		success, savedOrError = pcall(function()
+			return store:GetAsync(tostring(player.UserId))
+		end)
+	end
 	if states[player] ~= state then
 		return
 	end
 	if success then
 		applySavedState(state, savedOrError)
-	else
+	elseif store ~= nil then
 		warn("[PlayerProgressionService] failed to load progression for " .. player.Name .. ": " .. tostring(savedOrError))
 	end
 	state.loaded = true

@@ -13,12 +13,20 @@ type HistoryEntry = {
 	time: number,
 	cframe: CFrame,
 }
+type MotorMap = { [string]: Motor6D }
+type PoseMap = { [string]: CFrame }
+type RigAnimation = {
+	motors: MotorMap,
+	currentPoses: PoseMap,
+	time: number,
+}
 type VisualFollower = {
 	source: Instance,
 	root: VisualRoot,
 	owner: Player,
 	order: number,
 	currentCFrame: CFrame,
+	rig: RigAnimation?,
 	stateConnection: RBXScriptConnection?,
 	destroyConnection: RBXScriptConnection?,
 }
@@ -30,6 +38,7 @@ type PlayerGroup = {
 type KnockbackVisual = {
 	root: VisualRoot,
 	owner: Player,
+	rig: RigAnimation?,
 	startPosition: Vector3,
 	startRotation: CFrame,
 	peakPosition: Vector3,
@@ -56,6 +65,11 @@ local FORMATION_FOOT_CLEARANCE = 0.05 -- 小兵 Pivot 相对玩家脚底的微�
 local FOLLOW_DELAY_PER_ROW = 0.09 -- 每排比上一排晚多少秒复刻高度和朝向；越大波浪感越明显。
 local FOLLOW_ORIENTATION_SMOOTHNESS = 18 -- 朝向靠近延迟目标的柔和度；越大转向越利落。
 local PATH_HISTORY_SECONDS = 4 -- 保存玩家最近多少秒的路径。
+
+-- 拾取后的客户端视觉小兵统一由本脚本驱动，避免每个预制体运行独立脚本。
+local RUN_CYCLE_SPEED = 2.35 -- 每秒跑步循环数。
+local RIG_BLEND_SPEED = 14 -- Run/Fall 姿势切换速度。
+local FALLING_VERTICAL_SPEED = -1 -- 低于此垂直速度时切换为下落姿势。
 
 -- 小兵撞飞参数：全部只影响本机表现，可以直接修改后重开 Play 测试。
 local KNOCKBACK_DIRECTION_RANDOM_ANGLE = 18 -- 围绕“远离玩家”的方向随机偏转的最大角度（度）。
@@ -112,6 +126,85 @@ local function getParts(root: VisualRoot): { BasePart }
 		end
 	end
 	return parts
+end
+
+local function getRigAnimation(root: VisualRoot): RigAnimation?
+	if not root:IsA("Model") then
+		return nil
+	end
+	local torso = root:FindFirstChild("Torso")
+	local rootPart = root:FindFirstChild("HumanoidRootPart")
+	if torso == nil or not torso:IsA("BasePart") or rootPart == nil or not rootPart:IsA("BasePart") then
+		return nil
+	end
+
+	local candidates = {
+		RootJoint = rootPart:FindFirstChild("RootJoint"),
+		Neck = torso:FindFirstChild("Neck"),
+		RightShoulder = torso:FindFirstChild("Right Shoulder"),
+		LeftShoulder = torso:FindFirstChild("Left Shoulder"),
+		RightHip = torso:FindFirstChild("Right Hip"),
+		LeftHip = torso:FindFirstChild("Left Hip"),
+	}
+	local motors: MotorMap = {}
+	local currentPoses: PoseMap = {}
+	for name, candidate in candidates do
+		if candidate == nil or not candidate:IsA("Motor6D") then
+			return nil
+		end
+		motors[name] = candidate
+		currentPoses[name] = candidate.Transform
+	end
+	return {
+		motors = motors,
+		currentPoses = currentPoses,
+		time = math.random(),
+	}
+end
+
+local function getRunPose(time: number): PoseMap
+	local phase = math.sin(time * math.pi * 2)
+	local antiPhase = -phase
+	return {
+		RootJoint = CFrame.new(0, math.abs(phase) * 0.065, 0)
+			* CFrame.Angles(math.rad(-9), phase * 0.065, phase * 0.025),
+		Neck = CFrame.Angles(math.rad(7) + phase * 0.075, 0, 0),
+		RightShoulder = CFrame.Angles(phase * 1.05, 0, 0),
+		LeftShoulder = CFrame.Angles(antiPhase * 1.05, 0, 0),
+		RightHip = CFrame.Angles(antiPhase * 0.82, 0, 0),
+		LeftHip = CFrame.Angles(phase * 0.82, 0, 0),
+	}
+end
+
+local function getFallPose(time: number): PoseMap
+	local wave = math.sin(time * math.pi * 2)
+	local wave2 = math.cos(time * math.pi * 2)
+	return {
+		RootJoint = CFrame.Angles(0, 0, wave2 * 0.03),
+		Neck = CFrame.Angles(-0.25 + wave * 0.05, 0, 0),
+		RightShoulder = CFrame.Angles(-1.3 + wave * 0.08, 0, 0.25),
+		LeftShoulder = CFrame.Angles(-1.3 - wave * 0.08, 0, -0.25),
+		RightHip = CFrame.Angles(0.2 + wave2 * 0.04, 0, -0.08),
+		LeftHip = CFrame.Angles(0.2 - wave2 * 0.04, 0, 0.08),
+	}
+end
+
+local function updateRigAnimation(rig: RigAnimation?, deltaTime: number, isFalling: boolean)
+	if rig == nil then
+		return
+	end
+	rig.time += deltaTime * RUN_CYCLE_SPEED
+	local targetPoses = if isFalling then getFallPose(rig.time) else getRunPose(rig.time)
+	local blendAlpha = 1 - math.exp(-RIG_BLEND_SPEED * deltaTime)
+	for name, motor in rig.motors do
+		local currentPose = rig.currentPoses[name]
+		local targetPose = targetPoses[name]
+		if currentPose ~= nil and targetPose ~= nil then
+			local blendedPose = currentPose:Lerp(targetPose, blendAlpha)
+			rig.currentPoses[name] = blendedPose
+			motor.Transform = blendedPose
+		end
+	end
 end
 
 local function getPivot(root: VisualRoot): CFrame
@@ -260,6 +353,7 @@ local function startKnockback(follower: VisualFollower)
 	table.insert(knockbackVisuals, {
 		root = follower.root,
 		owner = follower.owner,
+		rig = follower.rig,
 		-- 轨迹在撞击瞬间转换到世界坐标；之后不再受角色与镜头位置变化影响。
 		startPosition = worldStart.Position,
 		startRotation = worldStart - worldStart.Position,
@@ -318,8 +412,10 @@ local function addVisualSource(source: Instance)
 			descendant:Destroy()
 		end
 	end
+	local anchoredRoot = if visualRoot:IsA("Model") then visualRoot.PrimaryPart else visualRoot
 	for _, part in getParts(visualRoot) do
-		part.Anchored = true
+		-- Motor6D 只能驱动未锚定的肢体；只锚定根部件来稳定整个客户端视觉模型。
+		part.Anchored = part == anchoredRoot
 		part.CanCollide = false
 		part.CanQuery = false
 		part.CanTouch = false
@@ -334,6 +430,7 @@ local function addVisualSource(source: Instance)
 		owner = owner,
 		order = math.floor(order),
 		currentCFrame = getPivot(visualRoot),
+		rig = getRigAnimation(visualRoot),
 		stateConnection = nil,
 		destroyConnection = nil,
 	}
@@ -377,6 +474,9 @@ local function updateFormation(deltaTime: number, now: number)
 		end
 
 		local orientationAlpha = 1 - math.exp(-FOLLOW_ORIENTATION_SMOOTHNESS * deltaTime)
+		local humanoidState = humanoid:GetState()
+		local isFalling = humanoidState == Enum.HumanoidStateType.Freefall
+			or root.AssemblyLinearVelocity.Y < FALLING_VERTICAL_SPEED
 		for index, follower in group.followers do
 			local row, x, z = getFormationSlot(index)
 			local delayedCFrame = sampleHistory(group.history, now - row * FOLLOW_DELAY_PER_ROW)
@@ -391,6 +491,8 @@ local function updateFormation(deltaTime: number, now: number)
 				follower.currentCFrame = CFrame.new(targetCFrame.Position) * currentRotation:Lerp(targetRotation, orientationAlpha)
 				pivotTo(follower.root, follower.currentCFrame)
 			end
+			-- 拾取后始终跑步；玩家下落时切换 Fall 姿势。
+			updateRigAnimation(follower.rig, deltaTime, isFalling)
 		end
 	end
 end
@@ -413,6 +515,8 @@ local function updateKnockbacks(deltaTime: number)
 			position = effect.peakPosition:Lerp(effect.landingPosition, eased)
 			progress = 0.5 + eased * 0.5
 		end
+		-- 撞飞到达最高点后进入下落阶段，立即混合至 Fall 姿势。
+		updateRigAnimation(effect.rig, deltaTime, effect.elapsed >= effect.riseDuration)
 
 		-- 先朝远离玩家的方向偏转，再向后翻倒 90°，最后加入小幅侧倾。
 		local rotation = effect.startRotation

@@ -20,7 +20,7 @@ end
 local ATTRIBUTE = GameplayConfig.Attributes
 local PROGRESSION = GameplayConfig.Progression
 local feedback = PROGRESSION.Feedback
-local popupCount = 0
+local popupRandom = Random.new()
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "ProgressionHud"
@@ -126,13 +126,19 @@ local function showExperiencePopup(amount: number)
 		return
 	end
 
-	popupCount += 1
+	local humanoid = if character ~= nil then character:FindFirstChildOfClass("Humanoid") else nil
+	local hipHeight = if humanoid ~= nil and humanoid:IsA("Humanoid") then humanoid.HipHeight else 2
+	local feetOffset = -(rootPart.Size.Y * 0.5 + hipHeight)
+	local horizontalDirection = if popupRandom:NextNumber() < 0.5 then -1 else 1
+	local horizontalDrift = horizontalDirection * popupRandom:NextNumber(0.45, 1.15)
+	local riseDistance = feedback.PopupRiseStuds * popupRandom:NextNumber(0.85, 1.25)
+
 	local popup = Instance.new("BillboardGui")
 	popup.Name = "ExperiencePopup"
 	popup.Adornee = rootPart
 	popup.AlwaysOnTop = true
 	popup.Size = UDim2.fromOffset(130, 48)
-	popup.StudsOffsetWorldSpace = Vector3.new(((popupCount - 1) % 3 - 1) * 0.45, 2.7, 0)
+	popup.StudsOffsetWorldSpace = Vector3.new(0, feetOffset, 0)
 	popup.Parent = playerGui
 
 	local label = Instance.new("TextLabel")
@@ -147,7 +153,7 @@ local function showExperiencePopup(amount: number)
 	label.Parent = popup
 
 	local popupTween = TweenService:Create(popup, TweenInfo.new(feedback.PopupDurationSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		StudsOffsetWorldSpace = popup.StudsOffsetWorldSpace + Vector3.new(0, feedback.PopupRiseStuds, 0),
+		StudsOffsetWorldSpace = popup.StudsOffsetWorldSpace + Vector3.new(horizontalDrift, riseDistance, 0),
 	})
 	local textTween = TweenService:Create(label, TweenInfo.new(feedback.PopupDurationSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
 		TextTransparency = 1,
