@@ -1,20 +1,24 @@
 --!strict
 
 --[[
-	Owns authoritative `Minion` collection and follower counts.
-	Minion tag: BasePart or Model (a Model must contain a BasePart).
-	Required attributes: EnergyValue: number, range 1..1,000,000.
+	Owns authoritative minion pickup collection and follower counts.
+	MinionPickup tag: BasePart or Model (a Model must contain a BasePart).
+	Required pickup attribute: MinionType: string, matching the exact name of a
+	direct child of ServerStorage/MinionTemplates (or ServerStorage in legacy places).
+	Required minion-template attribute: EnergyValue: number, range 1..1,000,000.
 	Optional attributes: Collected: boolean (runtime, defaults false);
-	SpawnOwnerUserId: number (runtime, only this player may collect the spawned Minion).
+	SpawnOwnerUserId: number (runtime, only this player may collect the pickup).
 
-	Collected objects are moved into ReplicatedStorage/MinionFollowerStorage as
-	replicated visual sources. The client owns formation movement and knockback;
-	the server only owns collection, energy values, follower state, and removal.
+	On collection, the referenced minion template is cloned into
+	ReplicatedStorage/MinionFollowerStorage as a replicated visual source, and the
+	pickup is destroyed. The client owns formation movement and knockback.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
+local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerStorage = game:GetService("ServerStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
@@ -25,6 +29,7 @@ type RootObject = GameplayUtil.RootObject
 type Binding = {
 	connections: { RBXScriptConnection },
 	root: RootObject,
+	template: Instance,
 	value: number,
 }
 type Follower = {
@@ -39,7 +44,7 @@ type PlayerConnectionState = {
 
 local MinionService = {}
 
-local TAG = GameplayConfig.Tags.Minion
+local TAG = GameplayConfig.Tags.MinionPickup
 local ATTRIBUTE = GameplayConfig.Attributes
 local FOLLOWER_STATE = GameplayConfig.FollowerStates
 local SOURCE_DESTROY_DELAY = 2
@@ -84,13 +89,33 @@ local function getPlayerStorage(player: Player): Folder
 	return folder
 end
 
-local function getEnergyValue(instance: Instance): number?
-	local value = instance:GetAttribute(ATTRIBUTE.EnergyValue)
-	if typeof(value) ~= "number" or value < 1 or value > GameplayConfig.Limits.MaxEnergyValue then
-		warn("[MinionService] Minion requires EnergyValue between 1 and " .. GameplayConfig.Limits.MaxEnergyValue, instance)
-		return nil
+local function getTemplateContainer(): Instance
+	local folder = ServerStorage:FindFirstChild(GameplayConfig.InstanceNames.MinionTemplates)
+	return if folder ~= nil and folder:IsA("Folder") then folder else ServerStorage
+end
+
+local function getMinionTemplate(minionType: string): (Instance?, number?)
+	local container = getTemplateContainer()
+	local template = container:FindFirstChild(minionType)
+	if template == nil or GameplayUtil.getRoot(template) == nil or not template.Archivable then
+		warn("[MinionService] missing, invalid, or non-archivable Minion template", minionType)
+		return nil, nil
 	end
-	return value
+	local value = template:GetAttribute(ATTRIBUTE.EnergyValue)
+	if typeof(value) ~= "number" or value ~= value or value < 1 or value > GameplayConfig.Limits.MaxEnergyValue then
+		warn("[MinionService] Minion template requires EnergyValue between 1 and " .. GameplayConfig.Limits.MaxEnergyValue, template)
+		return nil, nil
+	end
+	return template, value
+end
+
+local function getMinionDefinition(pickup: Instance): (Instance?, number?)
+	local minionType = pickup:GetAttribute(ATTRIBUTE.MinionType)
+	if typeof(minionType) ~= "string" or minionType == "" then
+		warn("[MinionService] pickup requires a non-empty MinionType string", pickup)
+		return nil, nil
+	end
+	return getMinionTemplate(minionType)
 end
 
 local function getFollowers(player: Player): { Follower }
@@ -120,14 +145,37 @@ local function prepareVisualSource(root: RootObject)
 end
 
 local function scheduleSourceDestroy(instance: Instance, delaySeconds: number)
-	task.delay(delaySeconds, function()
-		if instance.Parent ~= nil then
-			instance:Destroy()
-		end
-	end)
+	Debris:AddItem(instance, delaySeconds)
 end
 
-local function onMinionTouched(instance: Instance, touchedPart: BasePart)
+local function cloneFollowerSource(template: Instance): Instance?
+	if not template.Archivable then
+		return nil
+	end
+	local source = template:Clone()
+	local root = GameplayUtil.getRoot(source)
+	if root == nil then
+		source:Destroy()
+		return nil
+	end
+	prepareVisualSource(root)
+	CollectionService:RemoveTag(source, GameplayConfig.Tags.Minion)
+	CollectionService:RemoveTag(source, TAG)
+	return source
+end
+
+local function appendFollower(player: Player, source: Instance, value: number)
+	local order = (nextFollowerOrders[player] or 0) + 1
+	nextFollowerOrders[player] = order
+	source.Name = "Follower_" .. order
+	source:SetAttribute(ATTRIBUTE.FollowerOwnerUserId, player.UserId)
+	source:SetAttribute(ATTRIBUTE.FollowerOrder, order)
+	source:SetAttribute(ATTRIBUTE.FollowerState, FOLLOWER_STATE.Following)
+	source.Parent = getPlayerStorage(player)
+	table.insert(getFollowers(player), { instance = source, value = value, order = order })
+end
+
+local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 	local binding = bindings[instance]
 	if binding == nil or instance:GetAttribute(ATTRIBUTE.Collected) == true then
 		return
@@ -147,20 +195,20 @@ local function onMinionTouched(instance: Instance, touchedPart: BasePart)
 	if (GameplayUtil.getPivot(binding.root).Position - rootPart.Position).Magnitude > 12 then
 		return
 	end
+	if #getFollowers(player) >= GameplayConfig.Limits.MaxFollowersPerPlayer then
+		return
+	end
 
 	instance:SetAttribute(ATTRIBUTE.Collected, true)
-	prepareVisualSource(binding.root)
-
-	local order = (nextFollowerOrders[player] or 0) + 1
-	nextFollowerOrders[player] = order
-	instance:SetAttribute(ATTRIBUTE.FollowerOwnerUserId, player.UserId)
-	instance:SetAttribute(ATTRIBUTE.FollowerOrder, order)
-	instance:SetAttribute(ATTRIBUTE.FollowerState, FOLLOWER_STATE.Following)
-	instance.Parent = getPlayerStorage(player)
+	local followerSource = cloneFollowerSource(binding.template)
+	if followerSource == nil then
+		instance:SetAttribute(ATTRIBUTE.Collected, false)
+		warn("[MinionService] cloned Minion template lost its BasePart root", binding.template)
+		return
+	end
+	appendFollower(player, followerSource, binding.value)
 	CollectionService:RemoveTag(instance, TAG)
-
-	local playerFollowers = getFollowers(player)
-	table.insert(playerFollowers, { instance = instance, value = binding.value, order = order })
+	instance:Destroy()
 	updateFollowerCount(player)
 
 	local gained = PlayerEnergyService.addEnergy(player, binding.value)
@@ -172,20 +220,20 @@ local function bind(instance: Instance)
 		return
 	end
 	local root = GameplayUtil.getRoot(instance)
-	local value = getEnergyValue(instance)
-	if root == nil or value == nil then
+	local template, value = getMinionDefinition(instance)
+	if root == nil or template == nil or value == nil then
 		if root == nil then
-			warn("[MinionService] Minion must be a BasePart or Model containing a BasePart", instance)
+			warn("[MinionService] pickup must be a BasePart or Model containing a BasePart", instance)
 		end
 		return
 	end
 
 	instance:SetAttribute(ATTRIBUTE.Collected, false)
-	local binding: Binding = { root = root, value = value, connections = {} }
+	local binding: Binding = { root = root, template = template, value = value, connections = {} }
 	bindings[instance] = binding
 	for _, part in GameplayUtil.getParts(root) do
 		table.insert(binding.connections, part.Touched:Connect(function(otherPart)
-			onMinionTouched(instance, otherPart)
+			onPickupTouched(instance, otherPart)
 		end))
 	end
 end
@@ -199,6 +247,71 @@ local function unbind(instance: Instance)
 		connection:Disconnect()
 	end
 	bindings[instance] = nil
+end
+
+function MinionService.isValidMinionType(minionType: string): boolean
+	local template = getMinionTemplate(minionType)
+	return template ~= nil
+end
+
+function MinionService.getFollowerCount(player: Player): number
+	local playerFollowers = followers[player]
+	return if playerFollowers ~= nil then #playerFollowers else 0
+end
+
+-- Server-only count changes; energy remains independent. Add uses an authored
+-- template; multiplication copies the original formation in order, preserving types.
+-- All additional sources are prepared before committing, so failure changes nothing.
+function MinionService.setFollowerCount(player: Player, target: number, minionType: string?): boolean
+	local playerFollowers = followers[player]
+	if playerFollowers == nil or player.Parent ~= Players or target ~= target
+		or target % 1 ~= 0 or target < 0 or target > GameplayConfig.Limits.MaxFollowersPerPlayer
+	then
+		return false
+	end
+	local current = #playerFollowers
+	if target > current then
+		local template: Instance? = nil
+		local value: number? = nil
+		if minionType ~= nil then
+			template, value = getMinionTemplate(minionType)
+			if template == nil or value == nil then
+				return false
+			end
+		elseif current == 0 then
+			return false
+		end
+		local prepared: { Follower } = {}
+		for index = 1, target - current do
+			local sourceTemplate = template
+			local sourceValue = value
+			if sourceTemplate == nil then
+				local original = playerFollowers[(index - 1) % current + 1]
+				sourceTemplate = original.instance
+				sourceValue = original.value
+			end
+			local source = cloneFollowerSource(sourceTemplate)
+			if source == nil then
+				for _, follower in prepared do
+					follower.instance:Destroy()
+				end
+				warn("[MinionService] unable to clone follower source", sourceTemplate)
+				return false
+			end
+			table.insert(prepared, { instance = source, value = sourceValue :: number, order = 0 })
+		end
+		for _, follower in prepared do
+			appendFollower(player, follower.instance, follower.value)
+		end
+	else
+		while #playerFollowers > target do
+			local follower = table.remove(playerFollowers) :: Follower
+			follower.instance:SetAttribute(ATTRIBUTE.FollowerState, FOLLOWER_STATE.Knockback)
+			scheduleSourceDestroy(follower.instance, SOURCE_DESTROY_DELAY)
+		end
+	end
+	updateFollowerCount(player)
+	return true
 end
 
 function MinionService.releaseEnergyFollowers(player: Player, energyToRepresent: number): number

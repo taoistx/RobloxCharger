@@ -5,6 +5,9 @@ local GameplayConfig = {}
 GameplayConfig.Tags = {
 	GameZone = "GameZone",
 	Minion = "Minion",
+	MinionPickup = "MinionPickup",
+	MinionModifier = "MinionModifier",
+	Trap = "Trap",
 	Boss = "Boss",
 }
 
@@ -21,6 +24,11 @@ GameplayConfig.Attributes = {
 	StatusMessage = "StatusMessage",
 	BossImpactSequence = "BossImpactSequence",
 	EnergyValue = "EnergyValue",
+	EnergyDamage = "EnergyDamage",
+	MinionType = "MinionType",
+	Operation = "Operation",
+	Operand = "Operand",
+	Enabled = "Enabled",
 	FollowerCount = "FollowerCount",
 	FollowerOrder = "FollowerOrder",
 	FollowerOwnerUserId = "FollowerOwnerUserId",
@@ -42,6 +50,7 @@ GameplayConfig.InstanceNames = {
 	MinionFollowerStorage = "MinionFollowerStorage",
 	MinionSpawnSessions = "MinionSpawnSessions",
 	MinionTemplates = "MinionTemplates",
+	MinionPickupTemplate = "pickBall",
 	ProgressionFeedback = "ProgressionFeedback",
 }
 
@@ -54,6 +63,7 @@ GameplayConfig.Defaults = {
 	MinionEnergyValue = 10,
 	MinionSpawnCount = 10,
 	MinionSpawnMinSpacing = 5,
+	TrapTouchCooldownSeconds = 1,
 	BossRequiredEnergy = 100,
 	BossRespawnSeconds = 15,
 }
@@ -89,6 +99,7 @@ GameplayConfig.Limits = {
 	MaxRespawnSeconds = 3600,
 	MaxGameZoneIndex = 1000000,
 	MaxMinionsPerGameZone = 1000,
+	MaxFollowersPerPlayer = 1000,
 }
 
 function GameplayConfig.getCapacityForLevel(level: number): number

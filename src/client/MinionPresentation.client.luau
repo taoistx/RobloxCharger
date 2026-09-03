@@ -26,6 +26,8 @@ type VisualFollower = {
 	owner: Player,
 	order: number,
 	currentCFrame: CFrame,
+	joinElapsed: number,
+	hasPlaced: boolean,
 	rig: RigAnimation?,
 	stateConnection: RBXScriptConnection?,
 	destroyConnection: RBXScriptConnection?,
@@ -70,6 +72,12 @@ local PATH_HISTORY_SECONDS = 4 -- 保存玩家最近多少秒的路径。
 local RUN_CYCLE_SPEED = 2.35 -- 每秒跑步循环数。
 local RIG_BLEND_SPEED = 14 -- Run/Fall 姿势切换速度。
 local FALLING_VERTICAL_SPEED = -1 -- 低于此垂直速度时切换为下落姿势。
+
+-- 入队表演：从队伍槽位上方落下，触地后轻微弹起，再进入常规跟随。
+local JOIN_DROP_HEIGHT = 4 -- 初始高度（stud），保持“从天而降”但不会太高。
+local JOIN_DROP_DURATION = 0.58 -- 整段入队表演时长。
+local JOIN_IMPACT_PROGRESS = 0.78 -- 在整段动画的这个进度首次触地。
+local JOIN_BOUNCE_HEIGHT = 0.28 -- 触地后轻微弹起的最大高度。
 
 -- 小兵撞飞参数：全部只影响本机表现，可以直接修改后重开 Play 测试。
 local KNOCKBACK_DIRECTION_RANDOM_ANGLE = 18 -- 围绕“远离玩家”的方向随机偏转的最大角度（度）。
@@ -420,7 +428,8 @@ local function addVisualSource(source: Instance)
 		part.CanQuery = false
 		part.CanTouch = false
 		part.Massless = true
-		part.LocalTransparencyModifier = 0
+		-- 首次 RenderStepped 定位完成前先隐藏，避免在模板原坐标闪现一帧。
+		part.LocalTransparencyModifier = 1
 	end
 	clone.Parent = presentationFolder
 
@@ -430,6 +439,8 @@ local function addVisualSource(source: Instance)
 		owner = owner,
 		order = math.floor(order),
 		currentCFrame = getPivot(visualRoot),
+		joinElapsed = 0,
+		hasPlaced = false,
 		rig = getRigAnimation(visualRoot),
 		stateConnection = nil,
 		destroyConnection = nil,
@@ -448,6 +459,24 @@ local function addVisualSource(source: Instance)
 		destroyFollowerVisual(follower)
 	end)
 	onFollowerStateChanged(follower)
+end
+
+local function updateJoinAnimation(follower: VisualFollower, deltaTime: number): (number, boolean)
+	if follower.joinElapsed >= JOIN_DROP_DURATION then
+		return 0, false
+	end
+
+	follower.joinElapsed = math.min(follower.joinElapsed + deltaTime, JOIN_DROP_DURATION)
+	local progress = follower.joinElapsed / JOIN_DROP_DURATION
+	if progress < JOIN_IMPACT_PROGRESS then
+		local fallProgress = progress / JOIN_IMPACT_PROGRESS
+		-- 二次曲线从近乎静止开始并逐渐加速，模拟短距离自由落体。
+		return JOIN_DROP_HEIGHT * (1 - fallProgress * fallProgress), true
+	end
+
+	local bounceProgress = (progress - JOIN_IMPACT_PROGRESS) / (1 - JOIN_IMPACT_PROGRESS)
+	local bounceOffset = math.sin(bounceProgress * math.pi) * JOIN_BOUNCE_HEIGHT * (1 - bounceProgress)
+	return bounceOffset, false
 end
 
 local function updateFormation(deltaTime: number, now: number)
@@ -480,19 +509,29 @@ local function updateFormation(deltaTime: number, now: number)
 		for index, follower in group.followers do
 			local row, x, z = getFormationSlot(index)
 			local delayedCFrame = sampleHistory(group.history, now - row * FOLLOW_DELAY_PER_ROW)
+			local isJoiningFall = false
 			if delayedCFrame ~= nil then
+				local joinHeightOffset: number
+				joinHeightOffset, isJoiningFall = updateJoinAnimation(follower, deltaTime)
 				-- 水平位移使用当前玩家位置，保证小兵速度与玩家完全同步；
 				-- 高度与旋转读取延迟路径。小兵模板 Pivot 约定为脚底，因此使用角色脚底高度。
 				local footHeight = delayedCFrame.Position.Y - root.Size.Y / 2 - humanoid.HipHeight + FORMATION_FOOT_CLEARANCE
 				local synchronizedBase = CFrame.new(root.Position.X, footHeight, root.Position.Z) * (delayedCFrame - delayedCFrame.Position)
 				local targetCFrame = synchronizedBase * CFrame.new(x, 0, z)
+				local targetPosition = targetCFrame.Position + Vector3.new(0, joinHeightOffset, 0)
 				local currentRotation = follower.currentCFrame - follower.currentCFrame.Position
 				local targetRotation = targetCFrame - targetCFrame.Position
-				follower.currentCFrame = CFrame.new(targetCFrame.Position) * currentRotation:Lerp(targetRotation, orientationAlpha)
+				follower.currentCFrame = CFrame.new(targetPosition) * currentRotation:Lerp(targetRotation, orientationAlpha)
 				pivotTo(follower.root, follower.currentCFrame)
+				if not follower.hasPlaced then
+					follower.hasPlaced = true
+					for _, part in getParts(follower.root) do
+						part.LocalTransparencyModifier = 0
+					end
+				end
 			end
-			-- 拾取后始终跑步；玩家下落时切换 Fall 姿势。
-			updateRigAnimation(follower.rig, deltaTime, isFalling)
+			-- 入队下落或玩家下落时使用 Fall 姿势，其余时间保持跑步。
+			updateRigAnimation(follower.rig, deltaTime, isFalling or isJoiningFall)
 		end
 	end
 end

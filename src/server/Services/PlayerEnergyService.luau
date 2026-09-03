@@ -224,6 +224,15 @@ function PlayerEnergyService.addEnergy(player: Player, value: number): number
 	return getEnergy(player) - before
 end
 
+function PlayerEnergyService.removeEnergy(player: Player, value: number): number
+	if value <= 0 then
+		return 0
+	end
+	local before = getEnergy(player)
+	PlayerEnergyService.setEnergy(player, before - value)
+	return before - getEnergy(player)
+end
+
 function PlayerEnergyService.spendEnergy(player: Player, value: number): boolean
 	if value <= 0 then
 		return true
