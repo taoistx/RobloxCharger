@@ -259,27 +259,28 @@ function MinionService.getFollowerCount(player: Player): number
 	return if playerFollowers ~= nil then #playerFollowers else 0
 end
 
--- Server-only count changes; energy remains independent. Add uses an authored
--- template; multiplication copies the original formation in order, preserving types.
+-- Server-only count changes. Added/removed followers also add/remove the combat
+-- power represented by their EnergyValue. Multiplication preserves type composition.
 -- All additional sources are prepared before committing, so failure changes nothing.
-function MinionService.setFollowerCount(player: Player, target: number, minionType: string?): boolean
+function MinionService.setFollowerCount(player: Player, target: number, minionType: string?): (boolean, number)
 	local playerFollowers = followers[player]
 	if playerFollowers == nil or player.Parent ~= Players or target ~= target
 		or target % 1 ~= 0 or target < 0 or target > GameplayConfig.Limits.MaxFollowersPerPlayer
 	then
-		return false
+		return false, 0
 	end
 	local current = #playerFollowers
+	local powerChange = 0
 	if target > current then
 		local template: Instance? = nil
 		local value: number? = nil
 		if minionType ~= nil then
 			template, value = getMinionTemplate(minionType)
 			if template == nil or value == nil then
-				return false
+				return false, 0
 			end
 		elseif current == 0 then
-			return false
+			return false, 0
 		end
 		local prepared: { Follower } = {}
 		for index = 1, target - current do
@@ -296,22 +297,27 @@ function MinionService.setFollowerCount(player: Player, target: number, minionTy
 					follower.instance:Destroy()
 				end
 				warn("[MinionService] unable to clone follower source", sourceTemplate)
-				return false
+				return false, 0
 			end
 			table.insert(prepared, { instance = source, value = sourceValue :: number, order = 0 })
 		end
 		for _, follower in prepared do
 			appendFollower(player, follower.instance, follower.value)
+			powerChange += follower.value
 		end
+		powerChange = PlayerEnergyService.addEnergy(player, powerChange)
 	else
+		local removedPower = 0
 		while #playerFollowers > target do
 			local follower = table.remove(playerFollowers) :: Follower
+			removedPower += follower.value
 			follower.instance:SetAttribute(ATTRIBUTE.FollowerState, FOLLOWER_STATE.Knockback)
 			scheduleSourceDestroy(follower.instance, SOURCE_DESTROY_DELAY)
 		end
+		powerChange = -PlayerEnergyService.removeEnergy(player, removedPower)
 	end
 	updateFollowerCount(player)
-	return true
+	return true, powerChange
 end
 
 function MinionService.releaseEnergyFollowers(player: Player, energyToRepresent: number): number
