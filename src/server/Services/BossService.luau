@@ -1,58 +1,90 @@
 --!strict
 
 --[[
-	Owns `Boss` collision and defeat presentation.
-	Boss tag: BasePart or Model (a Model must contain a BasePart).
-	Required attributes: RequiredEnergy: number, range 1..1,000,000.
-	Optional attributes: RespawnSeconds: number, range 0..3,600 (defaults to 0, no respawn);
-	Defeated: boolean (runtime, defaults false).
+	Owns authoritative per-player `Boss` collision and lifecycle.
+	Boss template tag: BasePart or Model (a Model must contain a BasePart) in Workspace.
+	Required template attribute: RequiredEnergy: number in the range 1..1,000,000.
+	Optional template attributes: none.
+	Runtime attributes: BossOwnerUserId: the owning player's UserId;
+		Defeated: boolean, defaults false.
+
+	Tagged scene objects are templates. The service removes each template from the
+	runtime DataModel and creates one independent clone for every player's current
+	character. A player's clones are replaced only when that player respawns. There
+	is no timed Boss respawn. Only the owning player can trigger a runtime clone.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
-local Debris = game:GetService("Debris")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 
-local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Shared")
+local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 local GameplayUtil = require(script.Parent:WaitForChild("GameplayUtil"))
 local PlayerEnergyService = require(script.Parent:WaitForChild("PlayerEnergyService"))
 local MinionService = require(script.Parent:WaitForChild("MinionService"))
 
 type RootObject = GameplayUtil.RootObject
+type TemplateRecord = {
+	template: Instance,
+	parent: Instance,
+}
 type Binding = {
 	connections: { RBXScriptConnection },
 	root: RootObject,
 	requiredEnergy: number,
-	respawnSeconds: number,
+	owner: Player,
 	defeated: boolean,
+	lastContactTime: number,
+}
+type PlayerState = {
+	bosses: { [Instance]: boolean },
+	connections: { RBXScriptConnection },
 }
 
 local BossService = {}
 
 local TAG = GameplayConfig.Tags.Boss
 local ATTRIBUTE = GameplayConfig.Attributes
+local FEEDBACK_NAME = GameplayConfig.InstanceNames.BossDefeatFeedback
+
+local templates: { TemplateRecord } = {}
 local bindings: { [Instance]: Binding } = {}
-local playerContactTimes: { [Player]: number } = {}
+local playerStates: { [Player]: PlayerState } = {}
+local feedbackRemote: RemoteEvent? = nil
 local started = false
+
+local function createFeedbackRemote(): RemoteEvent
+	local existing = ReplicatedStorage:FindFirstChild(FEEDBACK_NAME)
+	if existing ~= nil and not existing:IsA("RemoteEvent") then
+		warn("[BossService] replacing incorrectly typed BossDefeatFeedback", existing)
+		existing:Destroy()
+		existing = nil
+	end
+	if existing ~= nil then
+		return existing :: RemoteEvent
+	end
+	local remote = Instance.new("RemoteEvent")
+	remote.Name = FEEDBACK_NAME
+	remote.Parent = ReplicatedStorage
+	return remote
+end
 
 local function getRequiredEnergy(instance: Instance): number?
 	local requiredEnergy = instance:GetAttribute(ATTRIBUTE.RequiredEnergy)
-	if typeof(requiredEnergy) ~= "number" or requiredEnergy < 1 or requiredEnergy > GameplayConfig.Limits.MaxBossRequiredEnergy then
-		warn("[BossService] Boss requires RequiredEnergy between 1 and " .. GameplayConfig.Limits.MaxBossRequiredEnergy, instance)
+	if typeof(requiredEnergy) ~= "number"
+		or requiredEnergy < 1
+		or requiredEnergy > GameplayConfig.Limits.MaxBossRequiredEnergy
+	then
+		warn(
+			"[BossService] Boss requires RequiredEnergy between 1 and "
+				.. GameplayConfig.Limits.MaxBossRequiredEnergy,
+			instance
+		)
 		return nil
 	end
 	return requiredEnergy
-end
-
-local function getRespawnSeconds(instance: Instance): number?
-	local seconds = instance:GetAttribute(ATTRIBUTE.RespawnSeconds)
-	if seconds == nil then
-		return 0
-	end
-	if typeof(seconds) ~= "number" or seconds < 0 or seconds > GameplayConfig.Limits.MaxRespawnSeconds then
-		warn("[BossService] RespawnSeconds must be between 0 and " .. GameplayConfig.Limits.MaxRespawnSeconds, instance)
-		return nil
-	end
-	return seconds
 end
 
 local function addThresholdDisplay(root: RootObject, requiredEnergy: number)
@@ -85,56 +117,39 @@ local function addThresholdDisplay(root: RootObject, requiredEnergy: number)
 	corner.Parent = label
 end
 
-local function spawnFragments(root: RootObject)
-	local origin = GameplayUtil.getPivot(root)
-	local sourcePart = GameplayUtil.getPrimaryPart(root)
-	local color = sourcePart.Color
-	local material = sourcePart.Material
-	for index = 1, 18 do
-		local fragment = Instance.new("Part")
-		fragment.Name = "BossFragment"
-		fragment.Size = Vector3.new(0.45 + (index % 3) * 0.28, 0.45 + (index % 4) * 0.24, 0.45 + (index % 5) * 0.2)
-		fragment.Color = color
-		fragment.Material = material
-		fragment.TopSurface = Enum.SurfaceType.Smooth
-		fragment.BottomSurface = Enum.SurfaceType.Smooth
-		fragment.CFrame = origin * CFrame.new(math.random(-15, 15) / 10, math.random(0, 12) / 10, math.random(-15, 15) / 10)
-		fragment.Parent = workspace
-		fragment:ApplyImpulse(Vector3.new(math.random(-24, 24), math.random(28, 58), math.random(-24, 24)) * fragment.AssemblyMass)
-		fragment:ApplyAngularImpulse(Vector3.new(math.random(-12, 12), math.random(-12, 12), math.random(-12, 12)) * fragment.AssemblyMass)
-		Debris:AddItem(fragment, 5)
-	end
-end
-
-local function respawnBoss(template: Instance, parent: Instance, seconds: number)
-	if seconds <= 0 then
+local function unbind(instance: Instance)
+	local binding = bindings[instance]
+	if binding == nil then
 		return
 	end
-	task.delay(seconds, function()
-		if parent.Parent == nil then
-			return
-		end
-		local clone = template:Clone()
-		clone:SetAttribute(ATTRIBUTE.Defeated, false)
-		clone.Parent = parent
-		CollectionService:AddTag(clone, TAG)
-	end)
+	bindings[instance] = nil
+	for _, connection in binding.connections do
+		connection:Disconnect()
+	end
+	local state = playerStates[binding.owner]
+	if state ~= nil then
+		state.bosses[instance] = nil
+	end
 end
 
 local function defeatBoss(instance: Instance, binding: Binding, player: Player)
 	binding.defeated = true
 	instance:SetAttribute(ATTRIBUTE.Defeated, true)
-	local template = instance:Clone()
-	local parent = instance.Parent
-	-- Start follower physics first so its replication reaches clients in the
-	-- same simulation step as the boss fragments.
 	local releasedCount = MinionService.releaseEnergyFollowers(player, binding.requiredEnergy)
-	spawnFragments(binding.root)
-	player:SetAttribute(ATTRIBUTE.StatusMessage, "Boss 击败！消耗 " .. math.floor(binding.requiredEnergy) .. " 能量，" .. releasedCount .. " 个小兵被撞飞。")
-	instance:Destroy()
-	if parent ~= nil then
-		respawnBoss(template, parent, binding.respawnSeconds)
+	local primaryPart = GameplayUtil.getPrimaryPart(binding.root)
+	local remote = feedbackRemote
+	if remote ~= nil then
+		remote:FireClient(player, GameplayUtil.getPivot(binding.root), primaryPart.Color)
 	end
+	player:SetAttribute(
+		ATTRIBUTE.StatusMessage,
+		"Boss 击败！消耗 "
+			.. math.floor(binding.requiredEnergy)
+			.. " 能量，"
+			.. releasedCount
+			.. " 个小兵被撞飞。"
+	)
+	instance:Destroy()
 end
 
 local function onBossTouched(instance: Instance, touchedPart: BasePart)
@@ -142,8 +157,13 @@ local function onBossTouched(instance: Instance, touchedPart: BasePart)
 	if binding == nil or binding.defeated then
 		return
 	end
-	local player, _, humanoid, rootPart = GameplayUtil.getCharacterFromTouch(touchedPart)
-	if player == nil or humanoid == nil or rootPart == nil or humanoid.Health <= 0 then
+	local player, character, humanoid, rootPart = GameplayUtil.getCharacterFromTouch(touchedPart)
+	if player ~= binding.owner
+		or player.Character ~= character
+		or humanoid == nil
+		or rootPart == nil
+		or humanoid.Health <= 0
+	then
 		return
 	end
 	if (GameplayUtil.getPivot(binding.root).Position - rootPart.Position).Magnitude > 15 then
@@ -151,19 +171,25 @@ local function onBossTouched(instance: Instance, touchedPart: BasePart)
 	end
 
 	local now = os.clock()
-	if (playerContactTimes[player] or 0) + 1 > now then
+	if binding.lastContactTime + 1 > now then
 		return
 	end
-	playerContactTimes[player] = now
+	binding.lastContactTime = now
 
 	if not PlayerEnergyService.spendEnergy(player, binding.requiredEnergy) then
-		player:SetAttribute(ATTRIBUTE.StatusMessage, "能量不足（需要 " .. math.floor(binding.requiredEnergy) .. "），被 Boss 击败！")
+		player:SetAttribute(
+			ATTRIBUTE.StatusMessage,
+			"能量不足（需要 " .. math.floor(binding.requiredEnergy) .. "），被 Boss 击败！"
+		)
 		humanoid.Health = 0
 		return
 	end
 
 	local impactSequence = player:GetAttribute(ATTRIBUTE.BossImpactSequence)
-	player:SetAttribute(ATTRIBUTE.BossImpactSequence, (if typeof(impactSequence) == "number" then impactSequence else 0) + 1)
+	player:SetAttribute(
+		ATTRIBUTE.BossImpactSequence,
+		(if typeof(impactSequence) == "number" then impactSequence else 0) + 1
+	)
 	defeatBoss(instance, binding, player)
 	local remainingEnergy = player:GetAttribute(ATTRIBUTE.CurrentEnergy)
 	if typeof(remainingEnergy) == "number" and remainingEnergy <= 0 then
@@ -172,40 +198,164 @@ local function onBossTouched(instance: Instance, touchedPart: BasePart)
 	end
 end
 
-local function bind(instance: Instance)
+local function bindRuntimeBoss(instance: Instance)
 	if bindings[instance] ~= nil then
+		return
+	end
+	local ownerUserId = instance:GetAttribute(ATTRIBUTE.BossOwnerUserId)
+	if typeof(ownerUserId) ~= "number" or ownerUserId ~= math.floor(ownerUserId) then
+		warn("[BossService] runtime Boss requires an integer BossOwnerUserId", instance)
+		return
+	end
+	local owner = Players:GetPlayerByUserId(ownerUserId)
+	local state = if owner ~= nil then playerStates[owner] else nil
+	if owner == nil or state == nil then
+		instance:Destroy()
 		return
 	end
 	local root = GameplayUtil.getRoot(instance)
 	local requiredEnergy = getRequiredEnergy(instance)
-	local respawnSeconds = getRespawnSeconds(instance)
-	if root == nil or requiredEnergy == nil or respawnSeconds == nil then
+	if root == nil or requiredEnergy == nil or not instance:IsDescendantOf(Workspace) then
 		if root == nil then
 			warn("[BossService] Boss must be a BasePart or Model containing a BasePart", instance)
 		end
+		instance:Destroy()
 		return
 	end
 
 	instance:SetAttribute(ATTRIBUTE.Defeated, false)
+	for _, part in GameplayUtil.getParts(root) do
+		part.CanCollide = false
+		part.CanTouch = true
+	end
 	addThresholdDisplay(root, requiredEnergy)
-	local binding: Binding = { root = root, requiredEnergy = requiredEnergy, respawnSeconds = respawnSeconds, defeated = false, connections = {} }
+	local binding: Binding = {
+		root = root,
+		requiredEnergy = requiredEnergy,
+		owner = owner,
+		defeated = false,
+		lastContactTime = 0,
+		connections = {},
+	}
 	bindings[instance] = binding
+	state.bosses[instance] = true
 	for _, part in GameplayUtil.getParts(root) do
 		table.insert(binding.connections, part.Touched:Connect(function(otherPart)
 			onBossTouched(instance, otherPart)
 		end))
 	end
+	table.insert(binding.connections, instance.Destroying:Connect(function()
+		unbind(instance)
+	end))
 end
 
-local function unbind(instance: Instance)
-	local binding = bindings[instance]
-	if binding == nil then
+local function spawnTemplateForPlayer(record: TemplateRecord, player: Player)
+	local state = playerStates[player]
+	local character = player.Character
+	if state == nil or character == nil or not character:IsDescendantOf(Workspace) then
 		return
 	end
-	for _, connection in binding.connections do
+	if record.parent.Parent == nil then
+		return
+	end
+	local clone = record.template:Clone()
+	clone:SetAttribute(ATTRIBUTE.BossOwnerUserId, player.UserId)
+	clone:SetAttribute(ATTRIBUTE.Defeated, false)
+	clone.Parent = record.parent
+	CollectionService:AddTag(clone, TAG)
+	bindRuntimeBoss(clone)
+end
+
+local function clearPlayerBosses(player: Player)
+	local state = playerStates[player]
+	if state == nil then
+		return
+	end
+	local bosses = {}
+	for boss in state.bosses do
+		table.insert(bosses, boss)
+	end
+	for _, boss in bosses do
+		if boss.Parent ~= nil then
+			boss:Destroy()
+		else
+			unbind(boss)
+		end
+	end
+	table.clear(state.bosses)
+end
+
+local function spawnAllBossesForCharacter(player: Player, character: Model)
+	if player.Character ~= character or not character:IsDescendantOf(Workspace) then
+		return
+	end
+	clearPlayerBosses(player)
+	for _, record in templates do
+		spawnTemplateForPlayer(record, player)
+	end
+end
+
+local function registerTemplate(instance: Instance)
+	if instance:GetAttribute(ATTRIBUTE.BossOwnerUserId) ~= nil then
+		bindRuntimeBoss(instance)
+		return
+	end
+	if not instance.Archivable then
+		warn("[BossService] Boss template must be Archivable", instance)
+		return
+	end
+	if GameplayUtil.getRoot(instance) == nil or getRequiredEnergy(instance) == nil then
+		warn("[BossService] invalid Boss template", instance)
+		return
+	end
+	local parent = instance.Parent
+	if parent == nil or not instance:IsDescendantOf(Workspace) then
+		warn("[BossService] Boss template must be inside Workspace", instance)
+		return
+	end
+
+	CollectionService:RemoveTag(instance, TAG)
+	instance.Parent = nil
+	local record: TemplateRecord = {
+		template = instance,
+		parent = parent,
+	}
+	table.insert(templates, record)
+	for player in playerStates do
+		spawnTemplateForPlayer(record, player)
+	end
+end
+
+local function bindPlayer(player: Player)
+	if playerStates[player] ~= nil then
+		return
+	end
+	local state: PlayerState = {
+		bosses = {},
+		connections = {},
+	}
+	playerStates[player] = state
+	table.insert(state.connections, player.CharacterAdded:Connect(function(character)
+		task.defer(spawnAllBossesForCharacter, player, character)
+	end))
+	table.insert(state.connections, player.CharacterRemoving:Connect(function()
+		clearPlayerBosses(player)
+	end))
+	if player.Character ~= nil then
+		task.defer(spawnAllBossesForCharacter, player, player.Character)
+	end
+end
+
+local function unbindPlayer(player: Player)
+	local state = playerStates[player]
+	if state == nil then
+		return
+	end
+	clearPlayerBosses(player)
+	for _, connection in state.connections do
 		connection:Disconnect()
 	end
-	bindings[instance] = nil
+	playerStates[player] = nil
 end
 
 function BossService.start()
@@ -213,11 +363,20 @@ function BossService.start()
 		return
 	end
 	started = true
-	for _, instance in CollectionService:GetTagged(TAG) do
-		bind(instance)
+	feedbackRemote = createFeedbackRemote()
+
+	local authoredTemplates = CollectionService:GetTagged(TAG)
+	for _, instance in authoredTemplates do
+		registerTemplate(instance)
 	end
-	CollectionService:GetInstanceAddedSignal(TAG):Connect(bind)
+	CollectionService:GetInstanceAddedSignal(TAG):Connect(registerTemplate)
 	CollectionService:GetInstanceRemovedSignal(TAG):Connect(unbind)
+
+	for _, player in Players:GetPlayers() do
+		bindPlayer(player)
+	end
+	Players.PlayerAdded:Connect(bindPlayer)
+	Players.PlayerRemoving:Connect(unbindPlayer)
 
 	print("[BossService] started")
 end

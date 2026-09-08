@@ -5,8 +5,13 @@
 	the next two `GameZone` indices.
 	GameZone tag: BasePart or Model (a Model must contain a BasePart).
 	Required attributes: ZoneIndex: integer in the range 0..1,000,000.
-	Optional attributes: MinionSpawnCount: integer in the range 1..1,000 (default: 10).
+	Optional attributes: MinionSpawnCount: -1 disables pickups for this zone;
+	otherwise an integer in the range 1..1,000 (default: 10).
 	Entering index N generates pickups in N, N + 1, and N + 2 once per player life.
+	MinionPicker-tagged descendants authored under a GameZone at server startup are
+	used as fixed-position presets. They count toward MinionSpawnCount, and only
+	the remaining difference is placed randomly. Presets take priority when their
+	count exceeds MinionSpawnCount. A count of -1 disables both kinds.
 
 	Templates: direct children of ServerStorage/MinionTemplates; if that folder is
 	absent, tagged direct children of ServerStorage are accepted for compatibility.
@@ -16,11 +21,14 @@
 	Each generated pickup has a MinionType string attribute containing the exact
 	name of the MinionTemplates child to add. SpawnOwnerUserId makes the pickup
 	collectable only by the player for whom it was generated. Its appearance is
-	cloned from the `pickBall` object in ServerStorage or Workspace.
+	cloned from the `pickBall` object in ServerStorage or Workspace. An optional
+	non-empty MinionType on `pickBall` locks random spawns to that template;
+	missing or empty keeps random template selection.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local ServerStorage = game:GetService("ServerStorage")
 local Workspace = game:GetService("Workspace")
 
@@ -32,6 +40,15 @@ type RootObject = GameplayUtil.RootObject
 type ZoneBounds = {
 	cframe: CFrame,
 	size: Vector3,
+}
+type AuthoredPickup = {
+	prototype: Instance,
+	pivot: CFrame,
+}
+type ZoneDefinition = {
+	bounds: ZoneBounds,
+	spawnCount: number,
+	authoredPickups: { AuthoredPickup },
 }
 type PlayerSpawnState = {
 	connections: { RBXScriptConnection },
@@ -50,9 +67,12 @@ local MAX_TEMPLATE_ENERGY = GameplayConfig.Limits.MaxEnergyValue
 local SPAWN_EDGE_PADDING = 3
 local SPAWN_SURFACE_OFFSET = 0.05
 local MAX_POSITION_ATTEMPTS = 24
+local DISABLED_SPAWN_COUNT = -1
 
 local templates: { Instance } = {}
 local pickupTemplate: Instance? = nil
+local forcedPickupMinionTemplate: Instance? = nil
+local authoredPickupsByZone: { [Instance]: { AuthoredPickup } } = {}
 local states: { [Player]: PlayerSpawnState } = {}
 local sessionRoot: Folder? = nil
 local started = false
@@ -111,7 +131,7 @@ local function cacheTemplates()
 			table.insert(templates, instance)
 			-- Legacy places tag templates as Minion. Templates themselves are never collectable.
 			CollectionService:RemoveTag(instance, TAG.Minion)
-			CollectionService:RemoveTag(instance, TAG.MinionPickup)
+			CollectionService:RemoveTag(instance, TAG.MinionPicker)
 		end
 	end
 	if #templates == 0 then
@@ -119,7 +139,17 @@ local function cacheTemplates()
 	end
 end
 
+local function findMinionTemplateByName(name: string): Instance?
+	for _, template in templates do
+		if template.Name == name then
+			return template
+		end
+	end
+	return nil
+end
+
 local function cachePickupTemplate()
+	forcedPickupMinionTemplate = nil
 	local templateName = INSTANCE_NAME.MinionPickupTemplate
 	local found = ServerStorage:FindFirstChild(templateName, true)
 	if found == nil then
@@ -138,8 +168,25 @@ local function cachePickupTemplate()
 	end
 	found.Archivable = true
 	CollectionService:RemoveTag(found, TAG.Minion)
-	CollectionService:RemoveTag(found, TAG.MinionPickup)
+	CollectionService:RemoveTag(found, TAG.MinionPicker)
 	pickupTemplate = found
+
+	local configuredMinionType = found:GetAttribute(ATTRIBUTE.MinionType)
+	if configuredMinionType == nil or configuredMinionType == "" then
+		return
+	end
+	if typeof(configuredMinionType) ~= "string" then
+		pickupTemplate = nil
+		warn("[MinionSpawnService] pickBall MinionType must be a string when configured", found)
+		return
+	end
+	local configuredTemplate = findMinionTemplateByName(configuredMinionType)
+	if configuredTemplate == nil then
+		pickupTemplate = nil
+		warn("[MinionSpawnService] pickBall MinionType must match a MinionTemplates child", found)
+		return
+	end
+	forcedPickupMinionTemplate = configuredTemplate
 end
 
 local function createPickup(minionTemplate: Instance, index: number): Instance?
@@ -167,6 +214,10 @@ local function createPickup(minionTemplate: Instance, index: number): Instance?
 	return pickup
 end
 
+local function hasMinionTemplate(minionType: string): boolean
+	return findMinionTemplateByName(minionType) ~= nil
+end
+
 local function getZoneIndex(instance: Instance): number?
 	local zoneIndex = instance:GetAttribute(ATTRIBUTE.ZoneIndex)
 	if typeof(zoneIndex) ~= "number"
@@ -184,14 +235,21 @@ local function getMinionSpawnCount(instance: Instance): number
 	if typeof(count) ~= "number" then
 		return DEFAULT.MinionSpawnCount
 	end
+	if count == DISABLED_SPAWN_COUNT then
+		return DISABLED_SPAWN_COUNT
+	end
 	if count ~= math.floor(count) or count < 1 or count > GameplayConfig.Limits.MaxMinionsPerGameZone then
-		warn("[MinionSpawnService] GameZone MinionSpawnCount must be an integer between 1 and " .. GameplayConfig.Limits.MaxMinionsPerGameZone, instance)
+		warn(
+			"[MinionSpawnService] GameZone MinionSpawnCount must be -1 or an integer between 1 and "
+				.. GameplayConfig.Limits.MaxMinionsPerGameZone,
+			instance
+		)
 		return DEFAULT.MinionSpawnCount
 	end
 	return count
 end
 
-local function getZoneBounds(zoneIndex: number): (ZoneBounds?, number?)
+local function getZoneDefinition(zoneIndex: number): ZoneDefinition?
 	for _, instance in CollectionService:GetTagged(TAG.GameZone) do
 		if getZoneIndex(instance) ~= zoneIndex then
 			continue
@@ -202,13 +260,85 @@ local function getZoneBounds(zoneIndex: number): (ZoneBounds?, number?)
 			continue
 		end
 		local spawnCount = getMinionSpawnCount(instance)
+		local bounds: ZoneBounds
 		if root:IsA("BasePart") then
-			return { cframe = root.CFrame, size = root.Size }, spawnCount
+			bounds = { cframe = root.CFrame, size = root.Size }
+		else
+			local cframe, size = root:GetBoundingBox()
+			bounds = { cframe = cframe, size = size }
 		end
-		local cframe, size = root:GetBoundingBox()
-		return { cframe = cframe, size = size }, spawnCount
+		return {
+			bounds = bounds,
+			spawnCount = spawnCount,
+			authoredPickups = authoredPickupsByZone[instance] or {},
+		}
 	end
-	return nil, nil
+	return nil
+end
+
+local function getOwningGameZone(instance: Instance): Instance?
+	local ancestor = instance.Parent
+	while ancestor ~= nil and ancestor ~= Workspace do
+		if CollectionService:HasTag(ancestor, TAG.GameZone) then
+			return ancestor
+		end
+		ancestor = ancestor.Parent
+	end
+	return nil
+end
+
+local function cacheAuthoredPickups()
+	authoredPickupsByZone = {}
+	local candidates: { { pickup: Instance, zone: Instance, pivot: CFrame } } = {}
+
+	for _, pickup in CollectionService:GetTagged(TAG.MinionPicker) do
+		local zone = getOwningGameZone(pickup)
+		if zone == nil then
+			continue
+		end
+		local root = GameplayUtil.getRoot(pickup)
+		if root == nil then
+			warn("[MinionSpawnService] authored pickup must be a BasePart or Model containing a BasePart", pickup)
+			continue
+		end
+		local minionType = pickup:GetAttribute(ATTRIBUTE.MinionType)
+		if typeof(minionType) ~= "string" or minionType == "" or not hasMinionTemplate(minionType) then
+			warn("[MinionSpawnService] authored pickup requires a valid MinionType", pickup)
+			continue
+		end
+		table.insert(candidates, { pickup = pickup, zone = zone, pivot = root:GetPivot() })
+	end
+
+	-- Remove the authored objects before MinionService binds them as shared world
+	-- pickups. The retained prototypes are cloned into each player's life session.
+	for _, candidate in candidates do
+		local zonePickups = authoredPickupsByZone[candidate.zone]
+		if zonePickups == nil then
+			zonePickups = {}
+			authoredPickupsByZone[candidate.zone] = zonePickups
+		end
+		candidate.pickup.Archivable = true
+		CollectionService:RemoveTag(candidate.pickup, TAG.MinionPicker)
+		candidate.pickup.Parent = nil
+		table.insert(zonePickups, {
+			prototype = candidate.pickup,
+			pivot = candidate.pivot,
+		})
+	end
+
+	if RunService:IsStudio() then
+		for zone, zonePickups in authoredPickupsByZone do
+			local spawnCount = getMinionSpawnCount(zone)
+			if spawnCount ~= DISABLED_SPAWN_COUNT and #zonePickups > spawnCount then
+				warn(
+					"[MinionSpawnService] authored pickup count exceeds MinionSpawnCount; all authored pickups will be used",
+					zone,
+					#zonePickups,
+					spawnCount
+				)
+			end
+		end
+	end
 end
 
 
@@ -283,12 +413,17 @@ local function spawnZone(player: Player, zoneIndex: number)
 	if state == nil or state.spawnedZoneIndices[zoneIndex] then
 		return
 	end
-	if #templates == 0 or pickupTemplate == nil then
+
+	local definition = getZoneDefinition(zoneIndex)
+	if definition == nil then
 		return
 	end
-
-	local zone, spawnCount = getZoneBounds(zoneIndex)
-	if zone == nil or spawnCount == nil then
+	local spawnCount = definition.spawnCount
+	if spawnCount == DISABLED_SPAWN_COUNT then
+		state.spawnedZoneIndices[zoneIndex] = true
+		return
+	end
+	if #templates == 0 then
 		return
 	end
 
@@ -297,8 +432,40 @@ local function spawnZone(player: Player, zoneIndex: number)
 	local placedPositions: { Vector3 } = {}
 	local spawnedCount = 0
 
-	for index = 1, spawnCount do
-		local minionTemplate = templates[math.random(1, #templates)]
+	for index, authoredPickup in definition.authoredPickups do
+		local pickup = authoredPickup.prototype:Clone()
+		local root = GameplayUtil.getRoot(pickup)
+		if root == nil then
+			pickup:Destroy()
+			warn("[MinionSpawnService] authored pickup clone lost its BasePart root")
+			continue
+		end
+		for _, part in GameplayUtil.getParts(root) do
+			part.Anchored = true
+			part.CanCollide = false
+			part.CanQuery = true
+			part.CanTouch = true
+			part.AssemblyLinearVelocity = Vector3.zero
+			part.AssemblyAngularVelocity = Vector3.zero
+		end
+		root:PivotTo(authoredPickup.pivot)
+		pickup.Name = "AuthoredMinionPickup_" .. index
+		pickup:SetAttribute(ATTRIBUTE.Collected, false)
+		pickup:SetAttribute(ATTRIBUTE.SpawnOwnerUserId, player.UserId)
+		pickup.Parent = folder
+		CollectionService:AddTag(pickup, TAG.MinionPicker)
+		table.insert(placedPositions, authoredPickup.pivot.Position)
+		spawnedCount += 1
+	end
+
+	local randomSpawnCount = math.max(spawnCount - #definition.authoredPickups, 0)
+	for randomIndex = 1, randomSpawnCount do
+		if pickupTemplate == nil then
+			break
+		end
+		local index = #definition.authoredPickups + randomIndex
+		local minionTemplate = forcedPickupMinionTemplate
+			or templates[math.random(1, #templates)]
 		local pickup = createPickup(minionTemplate, index)
 		if pickup == nil then
 			warn("[MinionSpawnService] unable to clone pickup template")
@@ -311,7 +478,7 @@ local function spawnZone(player: Player, zoneIndex: number)
 			continue
 		end
 
-		local spawnCFrame = chooseSpawnCFrame(root, zone, placedPositions)
+		local spawnCFrame = chooseSpawnCFrame(root, definition.bounds, placedPositions)
 		if spawnCFrame == nil then
 			pickup:Destroy()
 			warn("[MinionSpawnService] unable to find a free pickup spawn position", player)
@@ -322,7 +489,7 @@ local function spawnZone(player: Player, zoneIndex: number)
 		pickup:SetAttribute(ATTRIBUTE.Collected, false)
 		pickup:SetAttribute(ATTRIBUTE.SpawnOwnerUserId, player.UserId)
 		pickup.Parent = folder
-		CollectionService:AddTag(pickup, TAG.MinionPickup)
+		CollectionService:AddTag(pickup, TAG.MinionPicker)
 		table.insert(placedPositions, spawnCFrame.Position)
 		spawnedCount += 1
 	end
@@ -409,8 +576,9 @@ function MinionSpawnService.start()
 	end
 	started = true
 	getSessionRoot()
-	cachePickupTemplate()
 	cacheTemplates()
+	cachePickupTemplate()
+	cacheAuthoredPickups()
 
 	for _, player in Players:GetPlayers() do
 		bindPlayer(player)

@@ -69,7 +69,6 @@ function DemoArenaService.buildIfNeeded()
 	boss.Shape = Enum.PartType.Ball
 	boss.Material = Enum.Material.Neon
 	boss:SetAttribute(ATTRIBUTE.RequiredEnergy, 100)
-	boss:SetAttribute(ATTRIBUTE.RespawnSeconds, GameplayConfig.Defaults.BossRespawnSeconds)
 	CollectionService:AddTag(boss, TAG.Boss)
 
 	local finishLine = createPart(arena, "BossApproach", Vector3.new(86, 1, 14), CFrame.new(0, 0.55, 53), Color3.fromRGB(92, 38, 55))

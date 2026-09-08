@@ -5,9 +5,11 @@ local GameplayConfig = {}
 GameplayConfig.Tags = {
 	GameZone = "GameZone",
 	Minion = "Minion",
-	MinionPickup = "MinionPickup",
+	MinionPicker = "MinionPicker",
 	MinionModifier = "MinionModifier",
+	RandomMinionModifierGroup = "RandomMinionModifierGroup",
 	Trap = "Trap",
+	KillZone = "KillZone",
 	Boss = "Boss",
 }
 
@@ -20,9 +22,13 @@ GameplayConfig.Attributes = {
 	IsInGameZone = "IsInGameZone",
 	ZoneIndex = "ZoneIndex",
 	CurrentGameZoneIndex = "CurrentGameZoneIndex",
+	ForcedRunSpeed = "ForcedRunSpeed",
+	ForcedRunDirection = "ForcedRunDirection",
+	ForcedRunActive = "ForcedRunActive",
 	MinionSpawnCount = "MinionSpawnCount",
 	StatusMessage = "StatusMessage",
 	BossImpactSequence = "BossImpactSequence",
+	BossOwnerUserId = "BossOwnerUserId",
 	EnergyValue = "EnergyValue",
 	EnergyDamage = "EnergyDamage",
 	MinionType = "MinionType",
@@ -37,7 +43,6 @@ GameplayConfig.Attributes = {
 	RequiredEnergy = "RequiredEnergy",
 	Defeated = "Defeated",
 	Collected = "Collected",
-	RespawnSeconds = "RespawnSeconds",
 }
 
 GameplayConfig.FollowerStates = {
@@ -51,21 +56,34 @@ GameplayConfig.InstanceNames = {
 	MinionSpawnSessions = "MinionSpawnSessions",
 	MinionTemplates = "MinionTemplates",
 	MinionPickupTemplate = "pickBall",
+	MinionPickupFeedback = "MinionPickupFeedback",
 	ProgressionFeedback = "ProgressionFeedback",
+	RandomMinionModifierAssignment = "RandomMinionModifierAssignment",
+	RandomMinionModifierUpdate = "RandomMinionModifierUpdate",
+	BossDefeatFeedback = "BossDefeatFeedback",
 }
 
 GameplayConfig.Defaults = {
 	PlayerLevel = 1,
+	PlayerRespawnSeconds = 0.5,
 	BaseCapacity = 120,
 	CapacityPerLevel = 100,
-	EnergyPerStud = 0.65,
+	EnergyPerStud = 0.1,
+	-- Running distance accumulated before energy is awarded.
+	DistancePerEnergyAward = 10,
 	IdleEnergyDrainPerSecond = 5,
 	MinionEnergyValue = 10,
 	MinionSpawnCount = 10,
 	MinionSpawnMinSpacing = 5,
 	TrapTouchCooldownSeconds = 1,
 	BossRequiredEnergy = 100,
-	BossRespawnSeconds = 15,
+}
+
+GameplayConfig.MinionPickup = {
+	Feedback = {
+		SoundId = "rbxassetid://15004790432",
+		SoundVolume = 0.6,
+	},
 }
 
 -- Experience requirements are keyed by the level the player is reaching.
@@ -80,8 +98,10 @@ GameplayConfig.Progression = {
 		[5] = 800,
 	},
 	FallbackExperienceIncreasePercent = 100,
-	DistancePerExperienceAward = 10,
-	ExperiencePerDistanceAward = 5,
+	-- Distance in studs per experience award.
+    DistancePerExperienceAward = 100,
+    -- Experience per distance award.
+	ExperiencePerDistanceAward = 1,
 	DataStoreName = "PlayerProgression_v1",
 	SaveIntervalSeconds = 60,
 	Feedback = {
@@ -96,8 +116,8 @@ GameplayConfig.Limits = {
 	MaxPlayerLevel = 1000,
 	MaxEnergyValue = 1000000,
 	MaxBossRequiredEnergy = 1000000,
-	MaxRespawnSeconds = 3600,
 	MaxGameZoneIndex = 1000000,
+	MaxForcedRunSpeed = 200,
 	MaxMinionsPerGameZone = 1000,
 	MaxFollowersPerPlayer = 1000,
 }

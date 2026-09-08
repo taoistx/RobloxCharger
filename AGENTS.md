@@ -28,19 +28,27 @@ Charger/
 │  │     ├─ BossService.luau
 │  │     ├─ DemoArenaService.luau
 │  │     ├─ GameplayUtil.luau
+│  │     ├─ ForcedRunService.luau
 │  │     ├─ MinionModifierService.luau
+│  │     ├─ RandomMinionModifierGroupService.luau
 │  │     ├─ MinionService.luau
 │  │     ├─ MinionSpawnService.luau
 │  │     ├─ PlayerEnergyService.luau
 │  │     ├─ PlayerProgressionService.luau
+│  │     ├─ KillZoneService.luau
 │  │     └─ TrapService.luau
 │  └─ client/
+│     ├─ BossPresentation.client.luau
 │     ├─ EnergyHud.client.luau
+│     ├─ ForcedRunController.client.luau
+│     ├─ MinionPickupPresentation.client.luau
 │     ├─ MinionModifierPresentation.client.luau
+│     ├─ RandomMinionModifierGroupPresentation.client.luau
 │     ├─ MinionPresentation.client.luau
 │     └─ ProgressionPresentation.client.luau
 ├─ docs/
-│  └─ MinionModifier.md
+│  ├─ MinionModifier.md
+│  └─ TagsAndAttributes.md
 ├─ assets/
 │  ├─ wooden+nutcracker+3d+model/
 │  ├─ wooden+nutcracker+3d+model500/
@@ -54,11 +62,37 @@ Charger/
 
 - `src/shared` 保存客户端与服务端共用的标签、属性、玩法参数和配置校验。
 - `src/server/GameplayBootstrap.server.luau` 是服务端入口，统一启动 `src/server/Services` 下的权威玩法服务。
-- `src/server/Services` 保存玩家成长与能量、士兵生成与队列、数量修改器、陷阱、Boss、演示场景及通用实例工具。
-- `src/client` 保存 HUD、成长反馈、士兵跟随及数量修改器等客户端表现。
+- `src/server/Services` 保存玩家成长与能量、强制前进、士兵生成与队列、数量修改器、陷阱、即死区域、Boss、演示场景及通用实例工具。
+- `src/client` 保存 HUD、Boss 玩家隔离与反馈、成长反馈、士兵跟随及数量修改器等客户端表现。
 - `docs` 保存玩法对象的配置与使用说明。
 - `assets`、`Scene.rbxmx` 和 `SoliderMinion.rbxm` 是场景与美术源资源，不在当前 Rojo 源码映射中。
 - 新增、删除或移动上述主要模块和目录时，应同步更新本节。
+
+### 跑动能量结算
+
+- `GameplayConfig.Defaults.EnergyPerStud` 定义每 stud 跑动距离对应的能量。
+- `GameplayConfig.Defaults.DistancePerEnergyAward` 定义一次能量结算所需累计的跑动距离（studs）。
+- `PlayerEnergyService` 只累计玩家位于 `GameZone` 内的有效跑动距离；累计距离达到结算间隔后，按 `结算份数 × DistancePerEnergyAward × EnergyPerStud` 增加能量。
+- 一次移动跨过多个结算间隔时必须结算全部完整份数，未满一个间隔的距离应保留到后续跑动，角色重建时清零。
+- 跑动能量仍由服务端权威计算；客户端不得提交距离或决定结算结果。
+
+### 玩家重生与出生保护
+
+- `GameplayConfig.Defaults.PlayerRespawnSeconds` 定义玩家死亡后的重生间隔；当前值为 `0.5` 秒。
+- `GameplayBootstrap.server.luau` 在服务启动前将该配置写入 `Players.RespawnTime`。不要在其他服务中重复实现角色自动重生计时。
+- 修改重生间隔后必须停止旧模拟并启动新的 Play/Test；运行中的服务端不会因 Rojo 同步自动重启。
+- 当前场景的 `Workspace.SpawnLocation.Duration` 应保持为 `0`，以禁用 Roblox 自动添加的可见 `ForceField` 出生保护球。新增 `SpawnLocation` 时，除非明确需要出生保护罩，也应将 `Duration` 设为 `0`。
+
+### GameZone 预置 MinionPicker
+
+- 服务器启动时，`MinionSpawnService` 会收集每个 `GameZone` 后代中已有且带 `MinionPicker` Tag 的有效对象，作为固定位置预置。
+- 预置对象必须是 `BasePart` 或包含 `BasePart` 的 `Model`，并设置有效的 `MinionType`；该名称必须精确匹配 `ServerStorage/MinionTemplates` 的直接子对象。
+- 场景中的预置原件只作为位置与外观原型。启动后服务会将原件移出 DataModel，并为每名玩家、每次出生在原位置创建带 `SpawnOwnerUserId` 的独立副本；因此运行时在原层级看不到预置原件属于正常行为。
+- `GameZone.MinionSpawnCount` 是每名玩家在该区域的目标数量。有效预置数小于目标时，只随机补足差值；预置数大于目标时保留全部预置且不再随机生成。
+- 预置数超过目标数的提示只允许在 `RunService:IsStudio()` 时输出，不得污染发布服务器日志或改变发布运行逻辑。
+- `MinionSpawnCount = -1` 会同时禁用预置与随机 picker；仅使用三个手摆 picker 时应设为 `3`，而不是 `-1`。
+- 随机 picker 选点时必须把预置位置计入 `MinionSpawnMinSpacing` 检查，避免随机对象与固定对象重叠。
+- 玩家死亡、角色移除或离开服务器时必须清理该玩家的运行时 picker；重生后再次进入相应区域时，预置和随机 picker 都按新的一条命重新创建。
 
 - `*.server.luau` 是服务端 Script；只放服务端逻辑。
 - `*.client.luau` 是客户端 LocalScript；只放输入、界面、镜头、音效和本地特效等表现逻辑。
@@ -129,6 +163,27 @@ Rojo 主要用于将本地源码同步到 Studio。
 ------
 
 # Studio MCP
+
+## 本机已验证路径映射（2026-09-04）
+
+当前项目与 Studio MCP 的有效路径为：
+
+```text
+Codex workspace: E:\Roblox\Projects\Charger
+Codex project key: e:\roblox\projects\charger
+Studio MCP executable: E:\Roblox\Versions\version-9fe94fb0e9d84c25\StudioMCP.exe
+```
+
+Codex 全局配置 `D:\Codex\.codex\config.toml` 中应使用：
+
+```toml
+[mcp_servers.Roblox_Studio]
+command = 'E:\Roblox\Versions\version-9fe94fb0e9d84c25\StudioMCP.exe'
+```
+
+Roblox Studio 自动更新后 `version-*` 目录可能变化。如果配置指向的版本目录已不存在，
+只在 `E:\Roblox\Versions` 的当前版本目录中定位 `StudioMCP.exe`，更新上述 `command`；
+不要继续使用已经删除的旧版本路径，也不要扫描无关磁盘、端口或进程。
 
 ## 核心原则
 

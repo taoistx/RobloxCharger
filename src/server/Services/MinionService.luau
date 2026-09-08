@@ -2,7 +2,7 @@
 
 --[[
 	Owns authoritative minion pickup collection and follower counts.
-	MinionPickup tag: BasePart or Model (a Model must contain a BasePart).
+	MinionPicker tag: BasePart or Model (a Model must contain a BasePart).
 	Required pickup attribute: MinionType: string, matching the exact name of a
 	direct child of ServerStorage/MinionTemplates (or ServerStorage in legacy places).
 	Required minion-template attribute: EnergyValue: number, range 1..1,000,000.
@@ -44,7 +44,7 @@ type PlayerConnectionState = {
 
 local MinionService = {}
 
-local TAG = GameplayConfig.Tags.MinionPickup
+local TAG = GameplayConfig.Tags.MinionPicker
 local ATTRIBUTE = GameplayConfig.Attributes
 local FOLLOWER_STATE = GameplayConfig.FollowerStates
 local SOURCE_DESTROY_DELAY = 2
@@ -54,7 +54,30 @@ local followers: { [Player]: { Follower } } = {}
 local nextFollowerOrders: { [Player]: number } = {}
 local playerConnections: { [Player]: PlayerConnectionState } = {}
 local storageRoot: Folder? = nil
+local pickupFeedbackEvent: RemoteEvent? = nil
 local started = false
+
+local function getPickupFeedbackEvent(): RemoteEvent
+	if pickupFeedbackEvent ~= nil and pickupFeedbackEvent.Parent ~= nil then
+		return pickupFeedbackEvent
+	end
+
+	local eventName = GameplayConfig.InstanceNames.MinionPickupFeedback
+	local existing = ReplicatedStorage:FindFirstChild(eventName)
+	if existing ~= nil and existing:IsA("RemoteEvent") then
+		pickupFeedbackEvent = existing
+		return existing
+	end
+	if existing ~= nil then
+		error("[MinionService] " .. eventName .. " must be a RemoteEvent: " .. existing:GetFullName())
+	end
+
+	local remote = Instance.new("RemoteEvent")
+	remote.Name = eventName
+	remote.Parent = ReplicatedStorage
+	pickupFeedbackEvent = remote
+	return remote
+end
 
 local function getStorageRoot(): Folder
 	if storageRoot ~= nil and storageRoot.Parent ~= nil then
@@ -107,6 +130,24 @@ local function getMinionTemplate(minionType: string): (Instance?, number?)
 		return nil, nil
 	end
 	return template, value
+end
+
+local function getDefaultMinionTemplate(): (Instance?, number?)
+	local candidates = getTemplateContainer():GetChildren()
+	table.sort(candidates, function(left, right)
+		return left.Name < right.Name
+	end)
+	for _, candidate in candidates do
+		local value = candidate:GetAttribute(ATTRIBUTE.EnergyValue)
+		if GameplayUtil.getRoot(candidate) ~= nil and candidate.Archivable
+			and typeof(value) == "number" and value == value
+			and value >= 1 and value <= GameplayConfig.Limits.MaxEnergyValue
+		then
+			return candidate, value
+		end
+	end
+	warn("[MinionService] no valid default Minion template found")
+	return nil, nil
 end
 
 local function getMinionDefinition(pickup: Instance): (Instance?, number?)
@@ -210,6 +251,7 @@ local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 	CollectionService:RemoveTag(instance, TAG)
 	instance:Destroy()
 	updateFollowerCount(player)
+	getPickupFeedbackEvent():FireClient(player)
 
 	local gained = PlayerEnergyService.addEnergy(player, binding.value)
 	player:SetAttribute(ATTRIBUTE.StatusMessage, if gained > 0 then "+" .. math.floor(gained) .. " 能量，小兵已加入！" else "能量已满，小兵仍会跟随你！")
@@ -280,7 +322,10 @@ function MinionService.setFollowerCount(player: Player, target: number, minionTy
 				return false, 0
 			end
 		elseif current == 0 then
-			return false, 0
+			template, value = getDefaultMinionTemplate()
+			if template == nil or value == nil then
+				return false, 0
+			end
 		end
 		local prepared: { Follower } = {}
 		for index = 1, target - current do
@@ -419,6 +464,7 @@ function MinionService.start()
 	end
 	started = true
 	getStorageRoot()
+	getPickupFeedbackEvent()
 
 	for _, instance in CollectionService:GetTagged(TAG) do
 		bind(instance)

@@ -4,7 +4,8 @@
 	Owns player energy and `GameZone` areas.
 	GameZone tag: BasePart or Model (a Model must contain a BasePart).
 	Required attributes: ZoneIndex: integer in the range 0..1,000,000.
-	Optional attributes: none.
+	Optional attributes owned here: none. ForcedRunService separately reads the
+	ForcedRunSpeed and ForcedRunDirection attributes from the same GameZone.
 	The tagged object's bounding box is the playable charging area.
 ]]
 
@@ -22,6 +23,7 @@ type PlayerState = {
 	humanoid: Humanoid?,
 	rootPart: BasePart?,
 	lastPosition: Vector3?,
+	distanceUntilEnergyAward: number,
 	playerConnections: { RBXScriptConnection },
 	characterConnections: { RBXScriptConnection },
 }
@@ -115,6 +117,7 @@ local function clearCharacterState(state: PlayerState)
 	state.humanoid = nil
 	state.rootPart = nil
 	state.lastPosition = nil
+	state.distanceUntilEnergyAward = GameplayConfig.Defaults.DistancePerEnergyAward
 end
 
 local function onCharacterAdded(player: Player, character: Model)
@@ -135,6 +138,7 @@ local function onCharacterAdded(player: Player, character: Model)
 	state.humanoid = humanoid
 	state.rootPart = rootPart
 	state.lastPosition = rootPart.Position
+	state.distanceUntilEnergyAward = GameplayConfig.Defaults.DistancePerEnergyAward
 	PlayerEnergyService.setEnergy(player, 0)
 	player:SetAttribute(ATTRIBUTE.IsInGameZone, false)
 	player:SetAttribute(ATTRIBUTE.CurrentGameZoneIndex, nil)
@@ -156,6 +160,7 @@ local function bindPlayer(player: Player)
 		humanoid = nil,
 		rootPart = nil,
 		lastPosition = nil,
+		distanceUntilEnergyAward = GameplayConfig.Defaults.DistancePerEnergyAward,
 		playerConnections = {},
 		characterConnections = {},
 	}
@@ -249,6 +254,18 @@ function PlayerEnergyService.isPlayerInGameZone(player: Player): boolean
 	return player:GetAttribute(ATTRIBUTE.IsInGameZone) == true
 end
 
+local function awardEnergyForRunningDistance(player: Player, state: PlayerState, distance: number)
+	local distancePerAward = math.max(0.001, GameplayConfig.Defaults.DistancePerEnergyAward)
+	state.distanceUntilEnergyAward -= distance
+	if state.distanceUntilEnergyAward > 0 then
+		return
+	end
+
+	local awardCount = 1 + math.floor(-state.distanceUntilEnergyAward / distancePerAward)
+	state.distanceUntilEnergyAward += awardCount * distancePerAward
+	PlayerEnergyService.addEnergy(player, awardCount * distancePerAward * GameplayConfig.Defaults.EnergyPerStud)
+end
+
 function PlayerEnergyService.start()
 	if started then
 		return
@@ -289,7 +306,7 @@ function PlayerEnergyService.start()
 			local distance = math.min((position - previousPosition).Magnitude, 32 * deltaTime)
 			local isRunning = humanoid.MoveDirection.Magnitude >= 0.05 and distance > 0.01
 			if isRunning then
-				PlayerEnergyService.addEnergy(player, distance * GameplayConfig.Defaults.EnergyPerStud)
+				awardEnergyForRunningDistance(player, state, distance)
 				PlayerProgressionService.addRunningDistance(player, distance)
 			else
 				PlayerEnergyService.spendEnergy(player, GameplayConfig.Defaults.IdleEnergyDrainPerSecond * deltaTime)
