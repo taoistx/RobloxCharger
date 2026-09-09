@@ -18,6 +18,7 @@ type PoseMap = { [string]: CFrame }
 type RigAnimation = {
 	motors: MotorMap,
 	currentPoses: PoseMap,
+	rootPart: BasePart,
 	time: number,
 }
 type VisualFollower = {
@@ -26,6 +27,8 @@ type VisualFollower = {
 	owner: Player,
 	order: number,
 	currentCFrame: CFrame,
+	facingYawRadians: number,
+	pivotHeightAboveBottom: number,
 	joinElapsed: number,
 	hasPlaced: boolean,
 	rig: RigAnimation?,
@@ -55,6 +58,8 @@ type KnockbackVisual = {
 
 local ATTRIBUTE = GameplayConfig.Attributes
 local FOLLOWER_STATE = GameplayConfig.FollowerStates
+local MINION_VISUAL = GameplayConfig.MinionVisual
+local VISUAL_MODE = MINION_VISUAL.Modes
 
 -- 三角队形参数：第 1 排 2 个、第 2 排 3 个、第 3 排 4 个，以此类推。
 local FORMATION_HORIZONTAL_SPACING = 1.8 -- 同一排小兵之间的横向间距。
@@ -114,10 +119,7 @@ local function getVisualRoot(instance: Instance): VisualRoot?
 	if not instance:IsA("Model") then
 		return nil
 	end
-	if instance.PrimaryPart == nil then
-		instance.PrimaryPart = instance:FindFirstChildWhichIsA("BasePart", true)
-	end
-	if instance.PrimaryPart == nil then
+	if instance:FindFirstChildWhichIsA("BasePart", true) == nil then
 		return nil
 	end
 	return instance
@@ -157,17 +159,116 @@ local function getRigAnimation(root: VisualRoot): RigAnimation?
 	local motors: MotorMap = {}
 	local currentPoses: PoseMap = {}
 	for name, candidate in candidates do
-		if candidate == nil or not candidate:IsA("Motor6D") then
+		if candidate == nil
+			or not candidate:IsA("Motor6D")
+			or candidate.Part0 == nil
+			or candidate.Part1 == nil
+			or not candidate.Part0:IsDescendantOf(root)
+			or not candidate.Part1:IsDescendantOf(root)
+		then
 			return nil
 		end
 		motors[name] = candidate
 		currentPoses[name] = candidate.Transform
 	end
+
+	-- Animated followers may only release parts that form one complete rigid/joint
+	-- graph rooted at HumanoidRootPart. A partially imported model otherwise falls
+	-- apart as soon as its unconnected decoration parts are unanchored.
+	local parts = getParts(root)
+	local adjacency: { [BasePart]: { BasePart } } = {}
+	for _, part in parts do
+		adjacency[part] = {}
+	end
+	for _, descendant in root:GetDescendants() do
+		local part0: BasePart? = nil
+		local part1: BasePart? = nil
+		if descendant:IsA("JointInstance") then
+			part0 = descendant.Part0
+			part1 = descendant.Part1
+		elseif descendant:IsA("WeldConstraint") then
+			part0 = descendant.Part0
+			part1 = descendant.Part1
+		end
+		if part0 ~= nil and part1 ~= nil and adjacency[part0] ~= nil and adjacency[part1] ~= nil then
+			table.insert(adjacency[part0], part1)
+			table.insert(adjacency[part1], part0)
+		end
+	end
+	local connected: { [BasePart]: boolean } = { [rootPart] = true }
+	local pending = { rootPart }
+	local pendingIndex = 1
+	while pendingIndex <= #pending do
+		local part = pending[pendingIndex]
+		pendingIndex += 1
+		for _, neighbor in adjacency[part] do
+			if not connected[neighbor] then
+				connected[neighbor] = true
+				table.insert(pending, neighbor)
+			end
+		end
+	end
+	for _, part in parts do
+		if not connected[part] then
+			return nil
+		end
+	end
 	return {
 		motors = motors,
 		currentPoses = currentPoses,
+		rootPart = rootPart,
 		time = math.random(),
 	}
+end
+
+local function readVisualMode(source: Instance): string
+	local value = source:GetAttribute(ATTRIBUTE.MinionVisualMode)
+	if value == nil then
+		return MINION_VISUAL.DefaultMode
+	end
+	if value == VISUAL_MODE.Auto or value == VISUAL_MODE.Animated or value == VISUAL_MODE.Static then
+		return value
+	end
+	warn("[MinionPresentation] invalid MinionVisualMode; using Auto", source)
+	return MINION_VISUAL.DefaultMode
+end
+
+local function readFacingYawRadians(source: Instance): number
+	local value = source:GetAttribute(ATTRIBUTE.FacingYawDegrees)
+	if value == nil then
+		return 0
+	end
+	if typeof(value) ~= "number" or value ~= value or math.abs(value) > MINION_VISUAL.MaxAbsFacingYawDegrees then
+		warn("[MinionPresentation] invalid FacingYawDegrees; using 0", source)
+		return 0
+	end
+	return math.rad(value)
+end
+
+local function readGroundOffset(source: Instance): number
+	local value = source:GetAttribute(ATTRIBUTE.GroundOffsetStuds)
+	if value == nil then
+		return 0
+	end
+	if typeof(value) ~= "number" or value ~= value or math.abs(value) > MINION_VISUAL.MaxAbsGroundOffsetStuds then
+		warn("[MinionPresentation] invalid GroundOffsetStuds; using 0", source)
+		return 0
+	end
+	return value
+end
+
+local function getPivotHeightAboveBottom(root: VisualRoot): number
+	local pivot = root:GetPivot()
+	local boundsCFrame: CFrame
+	local boundsSize: Vector3
+	if root:IsA("BasePart") then
+		boundsCFrame = root.CFrame
+		boundsSize = root.Size
+	else
+		boundsCFrame, boundsSize = root:GetBoundingBox()
+	end
+	local bottom = boundsCFrame:PointToWorldSpace(Vector3.new(0, -boundsSize.Y / 2, 0))
+	return pivot.Position.Y - bottom.Y
 end
 
 local function getRunPose(time: number): PoseMap
@@ -420,10 +521,24 @@ local function addVisualSource(source: Instance)
 			descendant:Destroy()
 		end
 	end
-	local anchoredRoot = if visualRoot:IsA("Model") then visualRoot.PrimaryPart else visualRoot
+	local requestedMode = readVisualMode(source)
+	local rig = getRigAnimation(visualRoot)
+	if requestedMode == VISUAL_MODE.Static then
+		rig = nil
+	elseif requestedMode == VISUAL_MODE.Animated and rig == nil then
+		warn("[MinionPresentation] Animated minion has an incomplete rig; using Static", source)
+	end
+	if rig == nil and visualRoot:IsA("Model") then
+		-- Server-side template validation may assign the first BasePart as PrimaryPart.
+		-- Imported static models can carry a non-identity primary PivotOffset, which
+		-- rotates the whole visual when PivotTo is first called. Clearing PrimaryPart
+		-- restores the model's authored WorldPivot without moving its parts.
+		visualRoot.PrimaryPart = nil
+	end
 	for _, part in getParts(visualRoot) do
-		-- Motor6D 只能驱动未锚定的肢体；只锚定根部件来稳定整个客户端视觉模型。
-		part.Anchored = part == anchoredRoot
+		-- Complete rigs release their connected limbs for Motor6D animation. Static
+		-- multi-part imports stay fully anchored and move kinematically as one model.
+		part.Anchored = if rig ~= nil then part == rig.rootPart else true
 		part.CanCollide = false
 		part.CanQuery = false
 		part.CanTouch = false
@@ -439,9 +554,11 @@ local function addVisualSource(source: Instance)
 		owner = owner,
 		order = math.floor(order),
 		currentCFrame = getPivot(visualRoot),
+		facingYawRadians = readFacingYawRadians(source),
+		pivotHeightAboveBottom = getPivotHeightAboveBottom(visualRoot) + readGroundOffset(source),
 		joinElapsed = 0,
 		hasPlaced = false,
-		rig = getRigAnimation(visualRoot),
+		rig = rig,
 		stateConnection = nil,
 		destroyConnection = nil,
 	}
@@ -514,13 +631,16 @@ local function updateFormation(deltaTime: number, now: number)
 				local joinHeightOffset: number
 				joinHeightOffset, isJoiningFall = updateJoinAnimation(follower, deltaTime)
 				-- 水平位移使用当前玩家位置，保证小兵速度与玩家完全同步；
-				-- 高度与旋转读取延迟路径。小兵模板 Pivot 约定为脚底，因此使用角色脚底高度。
+				-- 高度与旋转读取延迟路径。模型包围盒会自动贴到角色脚底，
+				-- 因此无动画导入模型不需要手工把 Pivot 放在脚底。
 				local footHeight = delayedCFrame.Position.Y - root.Size.Y / 2 - humanoid.HipHeight + FORMATION_FOOT_CLEARANCE
 				local synchronizedBase = CFrame.new(root.Position.X, footHeight, root.Position.Z) * (delayedCFrame - delayedCFrame.Position)
 				local targetCFrame = synchronizedBase * CFrame.new(x, 0, z)
-				local targetPosition = targetCFrame.Position + Vector3.new(0, joinHeightOffset, 0)
+				local targetPosition = targetCFrame.Position
+					+ Vector3.new(0, follower.pivotHeightAboveBottom + joinHeightOffset, 0)
 				local currentRotation = follower.currentCFrame - follower.currentCFrame.Position
-				local targetRotation = targetCFrame - targetCFrame.Position
+				local facingCFrame = targetCFrame * CFrame.Angles(0, follower.facingYawRadians, 0)
+				local targetRotation = facingCFrame - facingCFrame.Position
 				follower.currentCFrame = CFrame.new(targetPosition) * currentRotation:Lerp(targetRotation, orientationAlpha)
 				pivotTo(follower.root, follower.currentCFrame)
 				if not follower.hasPlaced then

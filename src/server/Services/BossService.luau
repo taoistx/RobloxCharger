@@ -32,6 +32,8 @@ type TemplateRecord = {
 }
 type Binding = {
 	connections: { RBXScriptConnection },
+	partConnections: { [BasePart]: RBXScriptConnection },
+	parts: { [BasePart]: boolean },
 	root: RootObject,
 	requiredEnergy: number,
 	owner: Player,
@@ -48,6 +50,7 @@ local BossService = {}
 local TAG = GameplayConfig.Tags.Boss
 local ATTRIBUTE = GameplayConfig.Attributes
 local FEEDBACK_NAME = GameplayConfig.InstanceNames.BossDefeatFeedback
+local TOUCH_VALIDATION_DISTANCE = GameplayConfig.Boss.TouchValidationDistance
 
 local templates: { TemplateRecord } = {}
 local bindings: { [Instance]: Binding } = {}
@@ -74,6 +77,7 @@ end
 local function getRequiredEnergy(instance: Instance): number?
 	local requiredEnergy = instance:GetAttribute(ATTRIBUTE.RequiredEnergy)
 	if typeof(requiredEnergy) ~= "number"
+		or requiredEnergy ~= requiredEnergy
 		or requiredEnergy < 1
 		or requiredEnergy > GameplayConfig.Limits.MaxBossRequiredEnergy
 	then
@@ -87,36 +91,6 @@ local function getRequiredEnergy(instance: Instance): number?
 	return requiredEnergy
 end
 
-local function addThresholdDisplay(root: RootObject, requiredEnergy: number)
-	local primaryPart = GameplayUtil.getPrimaryPart(root)
-	local existing = primaryPart:FindFirstChild("EnergyThresholdDisplay")
-	if existing ~= nil then
-		existing:Destroy()
-	end
-
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "EnergyThresholdDisplay"
-	billboard.Size = UDim2.fromOffset(150, 48)
-	billboard.StudsOffsetWorldSpace = Vector3.new(0, 5, 0)
-	billboard.AlwaysOnTop = true
-	billboard.Adornee = primaryPart
-	billboard.Parent = primaryPart
-
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundColor3 = Color3.fromRGB(52, 15, 18)
-	label.BackgroundTransparency = 0.2
-	label.TextColor3 = Color3.fromRGB(255, 228, 80)
-	label.Font = Enum.Font.GothamBlack
-	label.TextScaled = true
-	label.Text = "需要 " .. math.floor(requiredEnergy) .. " 能量"
-	label.Parent = billboard
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 8)
-	corner.Parent = label
-end
-
 local function unbind(instance: Instance)
 	local binding = bindings[instance]
 	if binding == nil then
@@ -126,6 +100,11 @@ local function unbind(instance: Instance)
 	for _, connection in binding.connections do
 		connection:Disconnect()
 	end
+	for _, connection in binding.partConnections do
+		connection:Disconnect()
+	end
+	table.clear(binding.partConnections)
+	table.clear(binding.parts)
 	local state = playerStates[binding.owner]
 	if state ~= nil then
 		state.bosses[instance] = nil
@@ -136,10 +115,17 @@ local function defeatBoss(instance: Instance, binding: Binding, player: Player)
 	binding.defeated = true
 	instance:SetAttribute(ATTRIBUTE.Defeated, true)
 	local releasedCount = MinionService.releaseEnergyFollowers(player, binding.requiredEnergy)
-	local primaryPart = GameplayUtil.getPrimaryPart(binding.root)
+	local boundsCFrame: CFrame
+	local boundsSize: Vector3
+	if binding.root:IsA("BasePart") then
+		boundsCFrame = binding.root.CFrame
+		boundsSize = binding.root.Size
+	else
+		boundsCFrame, boundsSize = binding.root:GetBoundingBox()
+	end
 	local remote = feedbackRemote
 	if remote ~= nil then
-		remote:FireClient(player, GameplayUtil.getPivot(binding.root), primaryPart.Color)
+		remote:FireClient(player, boundsCFrame, boundsSize)
 	end
 	player:SetAttribute(
 		ATTRIBUTE.StatusMessage,
@@ -152,9 +138,25 @@ local function defeatBoss(instance: Instance, binding: Binding, player: Player)
 	instance:Destroy()
 end
 
-local function onBossTouched(instance: Instance, touchedPart: BasePart)
+local function distanceToPartBounds(part: BasePart, worldPosition: Vector3): number
+	local localPosition = part.CFrame:PointToObjectSpace(worldPosition)
+	local half = part.Size / 2
+	local outside = Vector3.new(
+		math.max(math.abs(localPosition.X) - half.X, 0),
+		math.max(math.abs(localPosition.Y) - half.Y, 0),
+		math.max(math.abs(localPosition.Z) - half.Z, 0)
+	)
+	return outside.Magnitude
+end
+
+local function onBossTouched(instance: Instance, bossPart: BasePart, touchedPart: BasePart)
 	local binding = bindings[instance]
-	if binding == nil or binding.defeated then
+	if binding == nil
+		or binding.defeated
+		or not binding.parts[bossPart]
+		or not bossPart.CanTouch
+		or (bossPart ~= instance and not bossPart:IsDescendantOf(instance))
+	then
 		return
 	end
 	local player, character, humanoid, rootPart = GameplayUtil.getCharacterFromTouch(touchedPart)
@@ -166,7 +168,9 @@ local function onBossTouched(instance: Instance, touchedPart: BasePart)
 	then
 		return
 	end
-	if (GameplayUtil.getPivot(binding.root).Position - rootPart.Position).Magnitude > 15 then
+	-- Validate against the actual touched part bounds rather than the Boss pivot.
+	-- This remains correct for very large parts and models with distant children.
+	if distanceToPartBounds(bossPart, rootPart.Position) > TOUCH_VALIDATION_DISTANCE then
 		return
 	end
 
@@ -224,26 +228,51 @@ local function bindRuntimeBoss(instance: Instance)
 	end
 
 	instance:SetAttribute(ATTRIBUTE.Defeated, false)
-	for _, part in GameplayUtil.getParts(root) do
-		part.CanCollide = false
-		part.CanTouch = true
-	end
-	addThresholdDisplay(root, requiredEnergy)
 	local binding: Binding = {
 		root = root,
 		requiredEnergy = requiredEnergy,
 		owner = owner,
 		defeated = false,
-		lastContactTime = 0,
+		lastContactTime = -math.huge,
 		connections = {},
+		partConnections = {},
+		parts = {},
 	}
 	bindings[instance] = binding
 	state.bosses[instance] = true
-	for _, part in GameplayUtil.getParts(root) do
-		table.insert(binding.connections, part.Touched:Connect(function(otherPart)
-			onBossTouched(instance, otherPart)
-		end))
+
+	local function bindPart(part: BasePart)
+		if bindings[instance] ~= binding or binding.partConnections[part] ~= nil then
+			return
+		end
+		part.CanCollide = false
+		part.CanTouch = true
+		binding.parts[part] = true
+		binding.partConnections[part] = part.Touched:Connect(function(otherPart)
+			onBossTouched(instance, part, otherPart)
+		end)
 	end
+	local function unbindPart(part: BasePart)
+		binding.parts[part] = nil
+		local connection = binding.partConnections[part]
+		if connection ~= nil then
+			connection:Disconnect()
+			binding.partConnections[part] = nil
+		end
+	end
+	for _, part in GameplayUtil.getParts(root) do
+		bindPart(part)
+	end
+	table.insert(binding.connections, instance.DescendantAdded:Connect(function(descendant)
+		if descendant:IsA("BasePart") then
+			bindPart(descendant)
+		end
+	end))
+	table.insert(binding.connections, instance.DescendantRemoving:Connect(function(descendant)
+		if descendant:IsA("BasePart") then
+			unbindPart(descendant)
+		end
+	end))
 	table.insert(binding.connections, instance.Destroying:Connect(function()
 		unbind(instance)
 	end))

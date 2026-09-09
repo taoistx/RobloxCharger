@@ -39,6 +39,9 @@ GameplayConfig.Attributes = {
 	FollowerOrder = "FollowerOrder",
 	FollowerOwnerUserId = "FollowerOwnerUserId",
 	FollowerState = "FollowerState",
+	MinionVisualMode = "MinionVisualMode",
+	FacingYawDegrees = "FacingYawDegrees",
+	GroundOffsetStuds = "GroundOffsetStuds",
 	SpawnOwnerUserId = "SpawnOwnerUserId",
 	RequiredEnergy = "RequiredEnergy",
 	Defeated = "Defeated",
@@ -49,6 +52,17 @@ GameplayConfig.FollowerStates = {
 	Following = "Following",
 	Knockback = "Knockback",
 	Removed = "Removed",
+}
+
+GameplayConfig.MinionVisual = {
+	Modes = {
+		Auto = "Auto",
+		Animated = "Animated",
+		Static = "Static",
+	},
+	DefaultMode = "Auto",
+	MaxAbsFacingYawDegrees = 3600,
+	MaxAbsGroundOffsetStuds = 20,
 }
 
 GameplayConfig.InstanceNames = {
@@ -83,6 +97,24 @@ GameplayConfig.MinionPickup = {
 	Feedback = {
 		SoundId = "rbxassetid://15004790432",
 		SoundVolume = 0.6,
+	},
+}
+
+GameplayConfig.Boss = {
+	TouchValidationDistance = 12,
+	ObjectiveRefreshSeconds = 0.1,
+	Fragments = {
+		Color = Color3.fromRGB(220, 38, 52),
+		Count = 24,
+		SizeMin = 0.4,
+		SizeMax = 0.75,
+		SpreadCap = 8,
+		LifetimeSeconds = 4,
+		HorizontalImpulseMin = 14,
+		HorizontalImpulseMax = 28,
+		UpwardImpulseMin = 30,
+		UpwardImpulseMax = 55,
+		AngularImpulseMax = 12,
 	},
 }
 
