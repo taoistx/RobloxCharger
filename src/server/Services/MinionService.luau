@@ -239,6 +239,13 @@ local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 	if #getFollowers(player) >= GameplayConfig.Limits.MaxFollowersPerPlayer then
 		return
 	end
+	if not PlayerEnergyService.canAddEnergy(player) then
+		instance:SetAttribute(ATTRIBUTE.Collected, true)
+		CollectionService:RemoveTag(instance, TAG)
+		instance:Destroy()
+		player:SetAttribute(ATTRIBUTE.StatusMessage, "能量已满，小兵不会加入！")
+		return
+	end
 
 	instance:SetAttribute(ATTRIBUTE.Collected, true)
 	local followerSource = cloneFollowerSource(binding.template)
@@ -254,7 +261,7 @@ local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 	getPickupFeedbackEvent():FireClient(player)
 
 	local gained = PlayerEnergyService.addEnergy(player, binding.value)
-	player:SetAttribute(ATTRIBUTE.StatusMessage, if gained > 0 then "+" .. math.floor(gained) .. " 能量，小兵已加入！" else "能量已满，小兵仍会跟随你！")
+	player:SetAttribute(ATTRIBUTE.StatusMessage, "+" .. math.floor(gained) .. " 能量，小兵已加入！")
 end
 
 local function bind(instance: Instance)

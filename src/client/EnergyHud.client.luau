@@ -11,8 +11,9 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 
 local ATTRIBUTE = GameplayConfig.Attributes
-local BILLBOARD_SIZE = UDim2.fromScale(3.2, 0.48)
+local BILLBOARD_SIZE = UDim2.fromScale(3.8, 0.78)
 local BILLBOARD_HEAD_OFFSET = Vector3.new(0, 1.25, 0)
+local ENERGY_ICON = "rbxassetid://115538973890834"
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "EnergyHud"
@@ -32,31 +33,39 @@ billboard.Parent = playerGui
 local panel = Instance.new("Frame")
 panel.Name = "BarPanel"
 panel.Size = UDim2.fromScale(1, 1)
-panel.BackgroundColor3 = Color3.fromRGB(12, 18, 32)
-panel.BackgroundTransparency = 0.13
+panel.BackgroundTransparency = 1
 panel.Parent = billboard
-local panelCorner = Instance.new("UICorner")
-panelCorner.CornerRadius = UDim.new(1, 0)
-panelCorner.Parent = panel
-local panelStroke = Instance.new("UIStroke")
-panelStroke.Thickness = 1.5
-panelStroke.Color = Color3.fromRGB(79, 205, 255)
-panelStroke.Transparency = 0.2
-panelStroke.Parent = panel
+
+local energyIcon = Instance.new("ImageLabel")
+energyIcon.Name = "EnergyIcon"
+energyIcon.Size = UDim2.fromScale(0.48, 1.44)
+energyIcon.Position = UDim2.fromScale(-0.08, -0.22)
+energyIcon.BackgroundTransparency = 1
+energyIcon.Image = ENERGY_ICON
+energyIcon.ScaleType = Enum.ScaleType.Fit
+energyIcon.ZIndex = 4
+energyIcon.Parent = panel
 
 local barBackground = Instance.new("Frame")
-barBackground.Size = UDim2.fromScale(0.92, 0.72)
-barBackground.Position = UDim2.fromScale(0.04, 0.14)
+barBackground.Size = UDim2.fromScale(0.76, 0.48)
+barBackground.Position = UDim2.fromScale(0.2, 0.26)
 barBackground.BackgroundColor3 = Color3.fromRGB(31, 48, 70)
 barBackground.ClipsDescendants = true
+barBackground.ZIndex = 1
 barBackground.Parent = panel
 local barCorner = Instance.new("UICorner")
 barCorner.CornerRadius = UDim.new(1, 0)
 barCorner.Parent = barBackground
+local barStroke = Instance.new("UIStroke")
+barStroke.Thickness = 1.5
+barStroke.Color = Color3.fromRGB(79, 205, 255)
+barStroke.Transparency = 0.2
+barStroke.Parent = barBackground
 
 local barFill = Instance.new("Frame")
 barFill.Size = UDim2.fromScale(0, 1)
 barFill.BackgroundColor3 = Color3.fromRGB(61, 223, 255)
+barFill.ZIndex = 2
 barFill.Parent = barBackground
 local fillCorner = Instance.new("UICorner")
 fillCorner.CornerRadius = UDim.new(1, 0)
@@ -68,11 +77,11 @@ energyText.BackgroundTransparency = 1
 energyText.TextColor3 = Color3.fromRGB(255, 255, 255)
 energyText.Font = Enum.Font.GothamBlack
 energyText.TextScaled = true
-energyText.ZIndex = 2
+energyText.ZIndex = 3
 energyText.Parent = barBackground
 local energyTextSize = Instance.new("UITextSizeConstraint")
 energyTextSize.MinTextSize = 8
-energyTextSize.MaxTextSize = 16
+energyTextSize.MaxTextSize = 22
 energyTextSize.Parent = energyText
 
 -- Keep gameplay feedback readable without making the overhead energy bar wider.

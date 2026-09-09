@@ -229,6 +229,10 @@ function PlayerEnergyService.addEnergy(player: Player, value: number): number
 	return getEnergy(player) - before
 end
 
+function PlayerEnergyService.canAddEnergy(player: Player): boolean
+	return getEnergy(player) < getCapacity(player)
+end
+
 function PlayerEnergyService.removeEnergy(player: Player, value: number): number
 	if value <= 0 then
 		return 0
