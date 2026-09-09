@@ -21,7 +21,9 @@ Charger/
 ├─ src/
 │  ├─ shared/
 │  │  ├─ GameplayConfig.luau
-│  │  └─ MinionModifierConfig.luau
+│  │  ├─ MinionModifierConfig.luau
+│  │  ├─ ShopConfig.luau
+│  │  └─ TreadmillConfig.luau
 │  ├─ server/
 │  │  ├─ GameplayBootstrap.server.luau
 │  │  └─ Services/
@@ -35,36 +37,43 @@ Charger/
 │  │     ├─ MinionSpawnService.luau
 │  │     ├─ PlayerEnergyService.luau
 │  │     ├─ PlayerProgressionService.luau
+│  │     ├─ PlayerShopService.luau
 │  │     ├─ KillZoneService.luau
-│  │     └─ TrapService.luau
+│  │     ├─ TrapService.luau
+│  │     └─ TreadmillService.luau
 │  └─ client/
 │     ├─ BossPresentation.client.luau
+│     ├─ CoinPresentation.client.luau
 │     ├─ EnergyHud.client.luau
 │     ├─ ForcedRunController.client.luau
 │     ├─ MinionPickupPresentation.client.luau
 │     ├─ MinionModifierPresentation.client.luau
 │     ├─ RandomMinionModifierGroupPresentation.client.luau
 │     ├─ MinionPresentation.client.luau
-│     └─ ProgressionPresentation.client.luau
+│     ├─ ProgressionPresentation.client.luau
+│     ├─ ShopController.client.luau
+│     └─ TreadmillController.client.luau
 ├─ docs/
-│  ├─ MinionModifier.md
-│  └─ TagsAndAttributes.md
+│  ├─ charger-ui-gameplay-concept.png
+│  ├─ DecoratePetCastle.luau
+│  └─ UI_GAMEPLAY_CONCEPT.md
 ├─ assets/
 │  ├─ wooden+nutcracker+3d+model/
 │  ├─ wooden+nutcracker+3d+model500/
 │  └─ *.blend / *.blend1 / *.glb
 ├─ AGENTS.md
+├─ TagsAndAttributes.md
 ├─ default.project.json
 ├─ rojo-serve.bat
 ├─ Scene.rbxmx
 └─ SoliderMinion.rbxm
 ```
 
-- `src/shared` 保存客户端与服务端共用的标签、属性、玩法参数和配置校验。
+- `src/shared` 保存客户端与服务端共用的标签、属性、玩法参数、商店参数和配置校验。
 - `src/server/GameplayBootstrap.server.luau` 是服务端入口，统一启动 `src/server/Services` 下的权威玩法服务。
-- `src/server/Services` 保存玩家成长与能量、强制前进、士兵生成与队列、数量修改器、陷阱、即死区域、Boss、演示场景及通用实例工具。
-- `src/client` 保存 HUD、Boss 玩家隔离与反馈、成长反馈、士兵跟随及数量修改器等客户端表现。
-- `docs` 保存玩法对象的配置与使用说明。
+- `src/server/Services` 保存玩家成长、商店与游戏币、能量、强制前进、跑步机、士兵生成与队列、数量修改器、陷阱、即死区域、Boss、演示场景及通用实例工具。
+- `src/client` 保存 HUD、商店与金币反馈界面、跑步机购买提示、Boss 玩家隔离与反馈、成长反馈、士兵跟随及数量修改器等客户端表现。
+- `docs` 保存玩法概念、演示构建脚本和视觉参考；`TagsAndAttributes.md` 保存玩法对象的配置与使用说明。
 - `assets`、`Scene.rbxmx` 和 `SoliderMinion.rbxm` 是场景与美术源资源，不在当前 Rojo 源码映射中。
 - 新增、删除或移动上述主要模块和目录时，应同步更新本节。
 

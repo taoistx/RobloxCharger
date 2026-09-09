@@ -24,16 +24,20 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 local GameplayUtil = require(script.Parent:WaitForChild("GameplayUtil"))
 local PlayerEnergyService = require(script.Parent:WaitForChild("PlayerEnergyService"))
+local PlayerShopService = require(script.Parent:WaitForChild("PlayerShopService"))
 
 type RootObject = GameplayUtil.RootObject
 type Binding = {
 	connections: { RBXScriptConnection },
 	root: RootObject,
 	template: Instance,
-	value: number,
+	minionType: string,
+	baseValue: number,
 }
 type Follower = {
 	instance: Instance,
+	minionType: string,
+	baseValue: number,
 	value: number,
 	order: number,
 }
@@ -132,7 +136,7 @@ local function getMinionTemplate(minionType: string): (Instance?, number?)
 	return template, value
 end
 
-local function getDefaultMinionTemplate(): (Instance?, number?)
+local function getDefaultMinionTemplate(player: Player): (Instance?, string?, number?)
 	local candidates = getTemplateContainer():GetChildren()
 	table.sort(candidates, function(left, right)
 		return left.Name < right.Name
@@ -142,21 +146,23 @@ local function getDefaultMinionTemplate(): (Instance?, number?)
 		if GameplayUtil.getRoot(candidate) ~= nil and candidate.Archivable
 			and typeof(value) == "number" and value == value
 			and value >= 1 and value <= GameplayConfig.Limits.MaxEnergyValue
+			and PlayerShopService.isMinionUnlocked(player, candidate.Name)
 		then
-			return candidate, value
+			return candidate, candidate.Name, value
 		end
 	end
 	warn("[MinionService] no valid default Minion template found")
-	return nil, nil
+	return nil, nil, nil
 end
 
-local function getMinionDefinition(pickup: Instance): (Instance?, number?)
+local function getMinionDefinition(pickup: Instance): (Instance?, string?, number?)
 	local minionType = pickup:GetAttribute(ATTRIBUTE.MinionType)
 	if typeof(minionType) ~= "string" or minionType == "" then
 		warn("[MinionService] pickup requires a non-empty MinionType string", pickup)
-		return nil, nil
+		return nil, nil, nil
 	end
-	return getMinionTemplate(minionType)
+	local template, value = getMinionTemplate(minionType)
+	return template, minionType, value
 end
 
 local function getFollowers(player: Player): { Follower }
@@ -205,7 +211,7 @@ local function cloneFollowerSource(template: Instance): Instance?
 	return source
 end
 
-local function appendFollower(player: Player, source: Instance, value: number)
+local function appendFollower(player: Player, source: Instance, minionType: string, baseValue: number, value: number)
 	local order = (nextFollowerOrders[player] or 0) + 1
 	nextFollowerOrders[player] = order
 	source.Name = "Follower_" .. order
@@ -213,7 +219,13 @@ local function appendFollower(player: Player, source: Instance, value: number)
 	source:SetAttribute(ATTRIBUTE.FollowerOrder, order)
 	source:SetAttribute(ATTRIBUTE.FollowerState, FOLLOWER_STATE.Following)
 	source.Parent = getPlayerStorage(player)
-	table.insert(getFollowers(player), { instance = source, value = value, order = order })
+	table.insert(getFollowers(player), {
+		instance = source,
+		minionType = minionType,
+		baseValue = baseValue,
+		value = value,
+		order = order,
+	})
 end
 
 local function onPickupTouched(instance: Instance, touchedPart: BasePart)
@@ -239,11 +251,20 @@ local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 	if #getFollowers(player) >= GameplayConfig.Limits.MaxFollowersPerPlayer then
 		return
 	end
+	if not PlayerShopService.isMinionUnlocked(player, binding.minionType) then
+		player:SetAttribute(ATTRIBUTE.StatusMessage, "该小兵尚未解锁！")
+		return
+	end
 	if not PlayerEnergyService.canAddEnergy(player) then
 		instance:SetAttribute(ATTRIBUTE.Collected, true)
 		CollectionService:RemoveTag(instance, TAG)
 		instance:Destroy()
+		getPickupFeedbackEvent():FireClient(player)
 		player:SetAttribute(ATTRIBUTE.StatusMessage, "能量已满，小兵不会加入！")
+		return
+	end
+	local value = PlayerShopService.getMinionEnergyValue(player, binding.minionType, binding.baseValue)
+	if value == nil then
 		return
 	end
 
@@ -254,13 +275,13 @@ local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 		warn("[MinionService] cloned Minion template lost its BasePart root", binding.template)
 		return
 	end
-	appendFollower(player, followerSource, binding.value)
+	appendFollower(player, followerSource, binding.minionType, binding.baseValue, value)
 	CollectionService:RemoveTag(instance, TAG)
 	instance:Destroy()
 	updateFollowerCount(player)
 	getPickupFeedbackEvent():FireClient(player)
 
-	local gained = PlayerEnergyService.addEnergy(player, binding.value)
+	local gained = PlayerEnergyService.addEnergy(player, value)
 	player:SetAttribute(ATTRIBUTE.StatusMessage, "+" .. math.floor(gained) .. " 能量，小兵已加入！")
 end
 
@@ -269,8 +290,8 @@ local function bind(instance: Instance)
 		return
 	end
 	local root = GameplayUtil.getRoot(instance)
-	local template, value = getMinionDefinition(instance)
-	if root == nil or template == nil or value == nil then
+	local template, minionType, baseValue = getMinionDefinition(instance)
+	if root == nil or template == nil or minionType == nil or baseValue == nil then
 		if root == nil then
 			warn("[MinionService] pickup must be a BasePart or Model containing a BasePart", instance)
 		end
@@ -278,7 +299,13 @@ local function bind(instance: Instance)
 	end
 
 	instance:SetAttribute(ATTRIBUTE.Collected, false)
-	local binding: Binding = { root = root, template = template, value = value, connections = {} }
+	local binding: Binding = {
+		root = root,
+		template = template,
+		minionType = minionType,
+		baseValue = baseValue,
+		connections = {},
+	}
 	bindings[instance] = binding
 	for _, part in GameplayUtil.getParts(root) do
 		table.insert(binding.connections, part.Touched:Connect(function(otherPart)
@@ -308,6 +335,27 @@ function MinionService.getFollowerCount(player: Player): number
 	return if playerFollowers ~= nil then #playerFollowers else 0
 end
 
+function MinionService.refreshFollowerEnergyValues(player: Player)
+	local playerFollowers = followers[player]
+	if playerFollowers == nil then
+		return
+	end
+
+	local powerChange = 0
+	for _, follower in playerFollowers do
+		local value = PlayerShopService.getMinionEnergyValue(player, follower.minionType, follower.baseValue)
+		if value ~= nil and value ~= follower.value then
+			powerChange += value - follower.value
+			follower.value = value
+		end
+	end
+	if powerChange > 0 then
+		PlayerEnergyService.addEnergy(player, powerChange)
+	elseif powerChange < 0 then
+		PlayerEnergyService.removeEnergy(player, -powerChange)
+	end
+end
+
 -- Server-only count changes. Added/removed followers also add/remove the combat
 -- power represented by their EnergyValue. Multiplication preserves type composition.
 -- All additional sources are prepared before committing, so failure changes nothing.
@@ -322,25 +370,39 @@ function MinionService.setFollowerCount(player: Player, target: number, minionTy
 	local powerChange = 0
 	if target > current then
 		local template: Instance? = nil
+		local minionTypeToAdd: string? = nil
+		local baseValue: number? = nil
 		local value: number? = nil
 		if minionType ~= nil then
-			template, value = getMinionTemplate(minionType)
-			if template == nil or value == nil then
+			if not PlayerShopService.isMinionUnlocked(player, minionType) then
+				return false, 0
+			end
+			template, baseValue = getMinionTemplate(minionType)
+			value = PlayerShopService.getMinionEnergyValue(player, minionType, baseValue)
+			minionTypeToAdd = minionType
+			if template == nil or baseValue == nil or value == nil then
 				return false, 0
 			end
 		elseif current == 0 then
-			template, value = getDefaultMinionTemplate()
-			if template == nil or value == nil then
+			template, minionTypeToAdd, baseValue = getDefaultMinionTemplate(player)
+			if template ~= nil and minionTypeToAdd ~= nil and baseValue ~= nil then
+				value = PlayerShopService.getMinionEnergyValue(player, minionTypeToAdd, baseValue)
+			end
+			if template == nil or minionTypeToAdd == nil or baseValue == nil or value == nil then
 				return false, 0
 			end
 		end
 		local prepared: { Follower } = {}
 		for index = 1, target - current do
 			local sourceTemplate = template
+			local sourceMinionType = minionTypeToAdd
+			local sourceBaseValue = baseValue
 			local sourceValue = value
 			if sourceTemplate == nil then
 				local original = playerFollowers[(index - 1) % current + 1]
 				sourceTemplate = original.instance
+				sourceMinionType = original.minionType
+				sourceBaseValue = original.baseValue
 				sourceValue = original.value
 			end
 			local source = cloneFollowerSource(sourceTemplate)
@@ -351,10 +413,16 @@ function MinionService.setFollowerCount(player: Player, target: number, minionTy
 				warn("[MinionService] unable to clone follower source", sourceTemplate)
 				return false, 0
 			end
-			table.insert(prepared, { instance = source, value = sourceValue :: number, order = 0 })
+			table.insert(prepared, {
+				instance = source,
+				minionType = sourceMinionType :: string,
+				baseValue = sourceBaseValue :: number,
+				value = sourceValue :: number,
+				order = 0,
+			})
 		end
 		for _, follower in prepared do
-			appendFollower(player, follower.instance, follower.value)
+			appendFollower(player, follower.instance, follower.minionType, follower.baseValue, follower.value)
 			powerChange += follower.value
 		end
 		powerChange = PlayerEnergyService.addEnergy(player, powerChange)
@@ -439,6 +507,9 @@ local function bindPlayer(player: Player)
 	end))
 	table.insert(connectionState.connections, player.CharacterAdded:Connect(function(character)
 		bindCharacterDeath(player, character)
+	end))
+	table.insert(connectionState.connections, player:GetAttributeChangedSignal(ATTRIBUTE.ShopRevision):Connect(function()
+		MinionService.refreshFollowerEnergyValues(player)
 	end))
 	if player.Character ~= nil then
 		bindCharacterDeath(player, player.Character)

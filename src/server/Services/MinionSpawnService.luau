@@ -23,7 +23,8 @@
 	collectable only by the player for whom it was generated. Its appearance is
 	cloned from the `pickBall` object in ServerStorage or Workspace. An optional
 	non-empty MinionType on `pickBall` locks random spawns to that template;
-	missing or empty keeps random template selection.
+	missing or empty keeps random template selection. Locked minions are not
+	generated for players who have not unlocked them.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -35,6 +36,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 local GameplayUtil = require(script.Parent:WaitForChild("GameplayUtil"))
+local PlayerShopService = require(script.Parent:WaitForChild("PlayerShopService"))
 
 type RootObject = GameplayUtil.RootObject
 type ZoneBounds = {
@@ -216,6 +218,23 @@ end
 
 local function hasMinionTemplate(minionType: string): boolean
 	return findMinionTemplateByName(minionType) ~= nil
+end
+
+local function chooseRandomUnlockedTemplate(player: Player, preferredTemplate: Instance?): Instance?
+	if preferredTemplate ~= nil and PlayerShopService.isMinionUnlocked(player, preferredTemplate.Name) then
+		return preferredTemplate
+	end
+
+	local availableTemplates: { Instance } = {}
+	for _, template in templates do
+		if PlayerShopService.isMinionUnlocked(player, template.Name) then
+			table.insert(availableTemplates, template)
+		end
+	end
+	if #availableTemplates == 0 then
+		return nil
+	end
+	return availableTemplates[math.random(1, #availableTemplates)]
 end
 
 local function getZoneIndex(instance: Instance): number?
@@ -413,6 +432,9 @@ local function spawnZone(player: Player, zoneIndex: number)
 	if state == nil or state.spawnedZoneIndices[zoneIndex] then
 		return
 	end
+	if not PlayerShopService.isLoaded(player) then
+		return
+	end
 
 	local definition = getZoneDefinition(zoneIndex)
 	if definition == nil then
@@ -433,6 +455,12 @@ local function spawnZone(player: Player, zoneIndex: number)
 	local spawnedCount = 0
 
 	for index, authoredPickup in definition.authoredPickups do
+		local authoredMinionType = authoredPickup.prototype:GetAttribute(ATTRIBUTE.MinionType)
+		if typeof(authoredMinionType) ~= "string"
+			or not PlayerShopService.isMinionUnlocked(player, authoredMinionType)
+		then
+			continue
+		end
 		local pickup = authoredPickup.prototype:Clone()
 		local root = GameplayUtil.getRoot(pickup)
 		if root == nil then
@@ -458,14 +486,16 @@ local function spawnZone(player: Player, zoneIndex: number)
 		spawnedCount += 1
 	end
 
-	local randomSpawnCount = math.max(spawnCount - #definition.authoredPickups, 0)
+	local randomSpawnCount = math.max(spawnCount - spawnedCount, 0)
 	for randomIndex = 1, randomSpawnCount do
 		if pickupTemplate == nil then
 			break
 		end
 		local index = #definition.authoredPickups + randomIndex
-		local minionTemplate = forcedPickupMinionTemplate
-			or templates[math.random(1, #templates)]
+		local minionTemplate = chooseRandomUnlockedTemplate(player, forcedPickupMinionTemplate)
+		if minionTemplate == nil then
+			break
+		end
 		local pickup = createPickup(minionTemplate, index)
 		if pickup == nil then
 			warn("[MinionSpawnService] unable to clone pickup template")
@@ -535,6 +565,12 @@ local function bindPlayer(player: Player)
 	}
 	states[player] = state
 	table.insert(state.connections, player:GetAttributeChangedSignal(ATTRIBUTE.CurrentGameZoneIndex):Connect(function()
+		local zoneIndex = player:GetAttribute(ATTRIBUTE.CurrentGameZoneIndex)
+		if typeof(zoneIndex) == "number" and zoneIndex == math.floor(zoneIndex) and zoneIndex >= 0 then
+			preloadActiveAndUpcomingZones(player, zoneIndex)
+		end
+	end))
+	table.insert(state.connections, player:GetAttributeChangedSignal(ATTRIBUTE.ShopRevision):Connect(function()
 		local zoneIndex = player:GetAttribute(ATTRIBUTE.CurrentGameZoneIndex)
 		if typeof(zoneIndex) == "number" and zoneIndex == math.floor(zoneIndex) and zoneIndex >= 0 then
 			preloadActiveAndUpcomingZones(player, zoneIndex)

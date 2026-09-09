@@ -16,7 +16,7 @@ local CollectionService = game:GetService("CollectionService")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 local GameplayUtil = require(script.Parent:WaitForChild("GameplayUtil"))
-local PlayerProgressionService = require(script.Parent:WaitForChild("PlayerProgressionService"))
+local PlayerShopService = require(script.Parent:WaitForChild("PlayerShopService"))
 
 type PlayerState = {
 	character: Model?,
@@ -36,16 +36,8 @@ local states: { [Player]: PlayerState } = {}
 local zones: { [Instance]: number } = {}
 local started = false
 
-local function getLevel(player: Player): number
-	local level = player:GetAttribute(ATTRIBUTE.PlayerLevel)
-	if typeof(level) ~= "number" then
-		return GameplayConfig.Defaults.PlayerLevel
-	end
-	return math.clamp(math.floor(level), 1, GameplayConfig.Limits.MaxPlayerLevel)
-end
-
 local function setCapacity(player: Player): number
-	local capacity = GameplayConfig.getCapacityForLevel(getLevel(player))
+	local capacity = GameplayConfig.Defaults.BaseCapacity + PlayerShopService.getCapacityBonus(player)
 	player:SetAttribute(ATTRIBUTE.EnergyCapacity, capacity)
 	return capacity
 end
@@ -165,12 +157,11 @@ local function bindPlayer(player: Player)
 		characterConnections = {},
 	}
 	states[player] = state
-	player:SetAttribute(ATTRIBUTE.PlayerLevel, getLevel(player))
 	setCapacity(player)
 	PlayerEnergyService.setEnergy(player, 0)
 	player:SetAttribute(ATTRIBUTE.IsInGameZone, false)
 	player:SetAttribute(ATTRIBUTE.CurrentGameZoneIndex, nil)
-	table.insert(state.playerConnections, player:GetAttributeChangedSignal(ATTRIBUTE.PlayerLevel):Connect(function()
+	table.insert(state.playerConnections, player:GetAttributeChangedSignal(ATTRIBUTE.EnergyCapacityUpgradeLevel):Connect(function()
 		local capacity = setCapacity(player)
 		PlayerEnergyService.setEnergy(player, math.min(getEnergy(player), capacity))
 	end))
@@ -311,7 +302,7 @@ function PlayerEnergyService.start()
 			local isRunning = humanoid.MoveDirection.Magnitude >= 0.05 and distance > 0.01
 			if isRunning then
 				awardEnergyForRunningDistance(player, state, distance)
-				PlayerProgressionService.addRunningDistance(player, distance)
+				PlayerShopService.addRunningDistance(player, distance)
 			else
 				PlayerEnergyService.spendEnergy(player, GameplayConfig.Defaults.IdleEnergyDrainPerSecond * deltaTime)
 			end

@@ -11,6 +11,8 @@ GameplayConfig.Tags = {
 	Trap = "Trap",
 	KillZone = "KillZone",
 	Boss = "Boss",
+	Shop = "Shop",
+	Treadmill = "Treadmill",
 }
 
 GameplayConfig.Attributes = {
@@ -19,6 +21,9 @@ GameplayConfig.Attributes = {
 	ExperienceToNextLevel = "ExperienceToNextLevel",
 	CurrentEnergy = "CurrentEnergy",
 	EnergyCapacity = "EnergyCapacity",
+	Coins = "Coins",
+	EnergyCapacityUpgradeLevel = "EnergyCapacityUpgradeLevel",
+	ShopRevision = "ShopRevision",
 	IsInGameZone = "IsInGameZone",
 	ZoneIndex = "ZoneIndex",
 	CurrentGameZoneIndex = "CurrentGameZoneIndex",
@@ -46,6 +51,9 @@ GameplayConfig.Attributes = {
 	RequiredEnergy = "RequiredEnergy",
 	Defeated = "Defeated",
 	Collected = "Collected",
+	TreadmillEnabled = "TreadmillEnabled",
+	TreadmillGamePassId = "TreadmillGamePassId",
+	ActiveTreadmillMultiplier = "ActiveTreadmillMultiplier",
 }
 
 GameplayConfig.FollowerStates = {
@@ -72,9 +80,15 @@ GameplayConfig.InstanceNames = {
 	MinionPickupTemplate = "pickBall",
 	MinionPickupFeedback = "MinionPickupFeedback",
 	ProgressionFeedback = "ProgressionFeedback",
+	CoinAwardFeedback = "CoinAwardFeedback",
 	RandomMinionModifierAssignment = "RandomMinionModifierAssignment",
 	RandomMinionModifierUpdate = "RandomMinionModifierUpdate",
 	BossDefeatFeedback = "BossDefeatFeedback",
+	ShopGetSnapshot = "ShopGetSnapshot",
+	ShopPurchase = "ShopPurchase",
+	ShopUpdated = "ShopUpdated",
+	ShopOpenRequested = "ShopOpenRequested",
+	TreadmillPromptPurchase = "TreadmillPromptPurchase",
 }
 
 GameplayConfig.Defaults = {

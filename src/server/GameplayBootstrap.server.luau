@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 
+local PlayerShopService = require(script.Parent.Services:WaitForChild("PlayerShopService"))
 local PlayerEnergyService = require(script.Parent.Services:WaitForChild("PlayerEnergyService"))
 local ForcedRunService = require(script.Parent.Services:WaitForChild("ForcedRunService"))
 local PlayerProgressionService = require(script.Parent.Services:WaitForChild("PlayerProgressionService"))
@@ -15,10 +16,12 @@ local RandomMinionModifierGroupService = require(script.Parent.Services:WaitForC
 local TrapService = require(script.Parent.Services:WaitForChild("TrapService"))
 local KillZoneService = require(script.Parent.Services:WaitForChild("KillZoneService"))
 local BossService = require(script.Parent.Services:WaitForChild("BossService"))
+local TreadmillService = require(script.Parent.Services:WaitForChild("TreadmillService"))
 local DemoArenaService = require(script.Parent.Services:WaitForChild("DemoArenaService"))
 
 Players.RespawnTime = GameplayConfig.Defaults.PlayerRespawnSeconds
 
+PlayerShopService.start()
 PlayerProgressionService.start()
 PlayerEnergyService.start()
 ForcedRunService.start()
@@ -29,6 +32,7 @@ RandomMinionModifierGroupService.start()
 TrapService.start()
 KillZoneService.start()
 BossService.start()
+TreadmillService.start()
 DemoArenaService.buildIfNeeded()
 
 print("[GameplayBootstrap] gameplay services started")
