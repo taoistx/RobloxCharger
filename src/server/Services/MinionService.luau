@@ -51,7 +51,12 @@ local MinionService = {}
 local TAG = GameplayConfig.Tags.MinionPicker
 local ATTRIBUTE = GameplayConfig.Attributes
 local FOLLOWER_STATE = GameplayConfig.FollowerStates
+
+-- 拾取来源对象在击飞表现结束后延迟销毁的时间（秒）。
 local SOURCE_DESTROY_DELAY = 2
+
+-- 服务端接受拾取触碰的最大距离，用于过滤异常触碰事件（stud）。
+local PICKUP_TOUCH_DISTANCE = 12
 
 local bindings: { [Instance]: Binding } = {}
 local followers: { [Player]: { Follower } } = {}
@@ -245,7 +250,7 @@ local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 	if typeof(spawnOwnerUserId) == "number" and spawnOwnerUserId ~= player.UserId then
 		return
 	end
-	if (GameplayUtil.getPivot(binding.root).Position - rootPart.Position).Magnitude > 12 then
+	if (GameplayUtil.getPivot(binding.root).Position - rootPart.Position).Magnitude > PICKUP_TOUCH_DISTANCE then
 		return
 	end
 	if #getFollowers(player) >= GameplayConfig.Limits.MaxFollowersPerPlayer then

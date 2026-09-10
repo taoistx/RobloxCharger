@@ -1,0 +1,176 @@
+--!strict
+
+local ShopConfig = {}
+
+export type MinionConfig = {
+	displayName: string?,
+	unlockCoinCost: number?,
+	upgradeBaseCost: number?,
+	gamePassId: number?,
+}
+
+-- 游戏币、容量升级、小兵解锁和小兵能量升级使用的 DataStore 名称。
+ShopConfig.DataStoreName = "PlayerShop_v1"
+-- 新玩家默认拥有的小兵模板名称，必须匹配 MinionTemplates 下的对象名。
+ShopConfig.DefaultUnlockedMinionType = "rabbit"
+
+ShopConfig.CoinRewards = {
+	-- 在 GameZone 内累计多少 studs 的有效跑动后结算一次 Coins。
+	DistancePerAward = 20,
+	-- 每次跑动距离结算获得的 Coins 数量。
+	CoinsPerAward = 1,
+}
+
+ShopConfig.CoinPresentation = {
+	-- Free "Coin For GUI" Creator Store asset:
+	-- https://create.roblox.com/store/asset/124427641438396
+	-- Coins 反馈界面显示的图标资源。
+	IconImage = "rbxassetid://98180974328051",
+	Feedback = {
+		-- 获得 Coins 时播放的本地音效资源。
+		SoundId = "rbxassetid://9113856580",
+		-- Coins 音效音量。
+		SoundVolume = 0.55,
+		-- Coins 浮字显示时长（秒）。
+		PopupDurationSeconds = 0.7,
+		-- Coins 浮字上升距离（stud）。
+		PopupRiseStuds = 2.5,
+	},
+}
+
+ShopConfig.MinionEnergyUpgrades = {
+	-- 小兵能量升级每级增加的战力。
+	EnergyPerLevel = 1,
+	-- 小兵能量升级的默认初始价格（Coins）。
+	BaseCost = 10,
+	-- 小兵能量升级价格随当前等级增长的倍率。
+	CostMultiplier = 1.5,
+	-- 每个兵种可购买的能量升级最高等级。
+	MaxLevel = 100,
+}
+
+ShopConfig.EnergyCapacityUpgrades = {
+	-- 玩家容量升级每级增加的能量上限。
+	CapacityPerLevel = 50,
+	-- 容量升级的初始价格（Coins）。
+	BaseCost = 100,
+	-- 容量升级价格随当前等级增长的倍率。
+	CostMultiplier = 1.4,
+	-- 容量升级最高等级。
+	MaxLevel = 100,
+}
+
+ShopConfig.MinionUnlocks = {
+	-- 非默认小兵没有单独配置价格时使用的 Coins 解锁价格。
+	DefaultCoinCost = 500,
+}
+
+ShopConfig.PurchaseActions = {
+	-- 客户端请求购买时使用的操作名称。
+	UnlockMinion = "UnlockMinion",
+	UpgradeMinionEnergy = "UpgradeMinionEnergy",
+	UpgradeEnergyCapacity = "UpgradeEnergyCapacity",
+}
+
+ShopConfig.Prompt = {
+	-- 商店 ProximityPrompt 的实例名称。
+	Name = "ShopPrompt",
+	-- 玩家看到的交互动作文本。
+	ActionText = "Open",
+	-- 玩家看到的交互对象文本。
+	ObjectText = "Shop",
+	-- 打开商店所需的键盘按键。
+	KeyboardKeyCode = Enum.KeyCode.E,
+	-- 玩家可以触发提示的最大距离（stud）。
+	MaxActivationDistance = 12,
+	-- 按键需要持续按住的时间（秒）。
+	HoldDuration = 0,
+}
+
+-- Override entries by minion template name. GamePassId values should be filled
+-- after Roblox Game Passes are created for production.
+-- 下方表项以小兵模板名称为 key；正式创建 Game Pass 后再填写对应的 ID。
+ShopConfig.Minions = {
+	rabbit = {
+		-- 商店界面显示的小兵名称，不参与模板匹配。
+		displayName = "Rabbit",
+		-- 该小兵的 Coins 解锁价格；默认小兵固定为 0。
+		unlockCoinCost = 0,
+		-- 该小兵能量升级的初始价格（Coins）。
+		upgradeBaseCost = 50,
+		-- Game Pass ID；大于 0 时显示 Robux 解锁入口。
+		gamePassId = 0,
+	},
+} :: { [string]: MinionConfig }
+
+local function sanitizeLevel(level: number, maximum: number): number
+	if level ~= level then
+		return 0
+	end
+	return math.clamp(math.floor(level), 0, maximum)
+end
+
+local function getScaledCost(baseCost: number, multiplier: number, currentLevel: number, maxLevel: number): number?
+	local safeLevel = sanitizeLevel(currentLevel, maxLevel)
+	if safeLevel >= maxLevel then
+		return nil
+	end
+	return math.max(0, math.ceil(math.max(0, baseCost) * multiplier ^ safeLevel))
+end
+
+function ShopConfig.getMinionConfig(minionType: string): MinionConfig
+	return ShopConfig.Minions[minionType] or {}
+end
+
+function ShopConfig.getMinionDisplayName(minionType: string): string
+	local config = ShopConfig.getMinionConfig(minionType)
+	if typeof(config.displayName) == "string" and config.displayName ~= "" then
+		return config.displayName
+	end
+	return minionType
+end
+
+function ShopConfig.getMinionUnlockCost(minionType: string): number
+	if minionType == ShopConfig.DefaultUnlockedMinionType then
+		return 0
+	end
+	local config = ShopConfig.getMinionConfig(minionType)
+	if typeof(config.unlockCoinCost) == "number" and config.unlockCoinCost >= 0 then
+		return math.floor(config.unlockCoinCost)
+	end
+	return ShopConfig.MinionUnlocks.DefaultCoinCost
+end
+
+function ShopConfig.getMinionUpgradeCost(minionType: string, currentLevel: number): number?
+	local config = ShopConfig.getMinionConfig(minionType)
+	local baseCost = if typeof(config.upgradeBaseCost) == "number"
+		then config.upgradeBaseCost
+		else ShopConfig.MinionEnergyUpgrades.BaseCost
+	return getScaledCost(
+		baseCost,
+		ShopConfig.MinionEnergyUpgrades.CostMultiplier,
+		currentLevel,
+		ShopConfig.MinionEnergyUpgrades.MaxLevel
+	)
+end
+
+function ShopConfig.getCapacityUpgradeCost(currentLevel: number): number?
+	return getScaledCost(
+		ShopConfig.EnergyCapacityUpgrades.BaseCost,
+		ShopConfig.EnergyCapacityUpgrades.CostMultiplier,
+		currentLevel,
+		ShopConfig.EnergyCapacityUpgrades.MaxLevel
+	)
+end
+
+function ShopConfig.getMinionEnergyBonus(upgradeLevel: number): number
+	local safeLevel = sanitizeLevel(upgradeLevel, ShopConfig.MinionEnergyUpgrades.MaxLevel)
+	return safeLevel * ShopConfig.MinionEnergyUpgrades.EnergyPerLevel
+end
+
+function ShopConfig.getCapacityBonus(upgradeLevel: number): number
+	local safeLevel = sanitizeLevel(upgradeLevel, ShopConfig.EnergyCapacityUpgrades.MaxLevel)
+	return safeLevel * ShopConfig.EnergyCapacityUpgrades.CapacityPerLevel
+end
+
+return ShopConfig

@@ -66,9 +66,17 @@ local ATTRIBUTE = GameplayConfig.Attributes
 local INSTANCE_NAME = GameplayConfig.InstanceNames
 local DEFAULT = GameplayConfig.Defaults
 local MAX_TEMPLATE_ENERGY = GameplayConfig.Limits.MaxEnergyValue
+
+-- 随机拾取物距离 GameZone 水平边界的最小边距（stud）。
 local SPAWN_EDGE_PADDING = 3
+
+-- 随机拾取物相对地面或区域底部的抬高距离（stud）。
 local SPAWN_SURFACE_OFFSET = 0.05
+
+-- 每个随机位置最多尝试多少次，超过后放弃该位置。
 local MAX_POSITION_ATTEMPTS = 24
+
+-- GameZone.MinionSpawnCount 使用该值时完全禁用预置和随机拾取物。
 local DISABLED_SPAWN_COUNT = -1
 
 local templates: { Instance } = {}

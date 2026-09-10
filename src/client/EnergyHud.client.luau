@@ -158,11 +158,17 @@ local function updateHud()
 	}):Play()
 end
 
+-- Boss 撞击反馈使用的 RenderStep 名称。
 local CAMERA_STEP_NAME = "EnergyHudBossImpactCamera"
+-- 镜头向后拉开的最大距离（stud）。
 local CAMERA_PULL_DISTANCE = 7.5
+-- Boss 撞击期间增加的最大视野角（度）。
 local CAMERA_FOV_INCREASE = 7
+-- 镜头向后拉开的时长（秒）。
 local CAMERA_PULL_DURATION = 0.28
+-- 镜头保持拉远状态的时长（秒）。
 local CAMERA_HOLD_DURATION = 0.42
+-- 镜头恢复原位的时长（秒）。
 local CAMERA_RETURN_DURATION = 0.55
 local cameraEffectActive = false
 local cameraEffectStartedAt = 0

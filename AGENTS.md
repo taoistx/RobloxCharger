@@ -183,6 +183,20 @@ Codex project key: e:\roblox\projects\charger
 Studio MCP executable: E:\Roblox\Versions\version-9fe94fb0e9d84c25\StudioMCP.exe
 ```
 
+### Roblox 文件重定向
+
+本机 Roblox 的安装文件与本地数据均已从默认的 `%LocalAppData%\\Roblox` 重定向到
+`E:\Roblox`。后续需要读取或写入 Roblox 本地文件时，应优先使用该目录，不要假定
+`C:\Users\taoist\AppData\Local\Roblox` 可用。
+
+已验证的 Rojo Studio 插件目录为：
+
+```text
+E:\Roblox\Local\Roblox\Plugins
+```
+
+例如，Rojo 插件文件应位于 `E:\Roblox\Local\Roblox\Plugins\Rojo.rbxm`。
+
 Codex 全局配置 `D:\Codex\.codex\config.toml` 中应使用：
 
 ```toml

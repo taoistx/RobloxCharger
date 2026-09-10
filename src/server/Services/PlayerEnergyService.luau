@@ -32,6 +32,16 @@ local PlayerEnergyService = {}
 
 local TAG = GameplayConfig.Tags.GameZone
 local ATTRIBUTE = GameplayConfig.Attributes
+
+-- GameZone 垂直方向额外允许角色根部超出包围盒的距离（stud）。
+local ZONE_VERTICAL_TOLERANCE = 8
+-- 单帧最多计入能量和 Coins 的移动速度（stud/秒），用于过滤瞬移。
+local MAX_DISTANCE_PER_FRAME_SPEED = 32
+-- 移动方向达到该长度才视为玩家有意跑动。
+local MIN_MOVE_DIRECTION_MAGNITUDE = 0.05
+-- 单帧实际移动距离必须超过该值才计入跑动结算（stud）。
+local MIN_MOVEMENT_DISTANCE = 0.01
+
 local states: { [Player]: PlayerState } = {}
 local zones: { [Instance]: number } = {}
 local started = false
@@ -75,7 +85,7 @@ local function isPointInsideZone(zone: Instance, point: Vector3): boolean
 
 	local localPoint = boxCFrame:PointToObjectSpace(point)
 	return math.abs(localPoint.X) <= boxSize.X * 0.5
-		and math.abs(localPoint.Y) <= boxSize.Y * 0.5 + 8
+		and math.abs(localPoint.Y) <= boxSize.Y * 0.5 + ZONE_VERTICAL_TOLERANCE
 		and math.abs(localPoint.Z) <= boxSize.Z * 0.5
 end
 
@@ -298,8 +308,9 @@ function PlayerEnergyService.start()
 				continue
 			end
 
-			local distance = math.min((position - previousPosition).Magnitude, 32 * deltaTime)
-			local isRunning = humanoid.MoveDirection.Magnitude >= 0.05 and distance > 0.01
+			local distance = math.min((position - previousPosition).Magnitude, MAX_DISTANCE_PER_FRAME_SPEED * deltaTime)
+			local isRunning = humanoid.MoveDirection.Magnitude >= MIN_MOVE_DIRECTION_MAGNITUDE
+				and distance > MIN_MOVEMENT_DISTANCE
 			if isRunning then
 				awardEnergyForRunningDistance(player, state, distance)
 				PlayerShopService.addRunningDistance(player, distance)
