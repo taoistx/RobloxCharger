@@ -245,11 +245,11 @@ local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 	if player == nil or humanoid == nil or rootPart == nil or humanoid.Health <= 0 then
 		return
 	end
-	if not PlayerEnergyService.isPlayerInGameZone(player) then
-		return
-	end
 	local spawnOwnerUserId = instance:GetAttribute(ATTRIBUTE.SpawnOwnerUserId)
 	if typeof(spawnOwnerUserId) == "number" and spawnOwnerUserId ~= player.UserId then
+		return
+	end
+	if not PlayerEnergyService.isPlayerInGameZone(player) then
 		return
 	end
 	if (GameplayUtil.getPivot(binding.root).Position - rootPart.Position).Magnitude > PICKUP_TOUCH_DISTANCE then
@@ -332,11 +332,6 @@ local function unbind(instance: Instance)
 	bindings[instance] = nil
 end
 
-function MinionService.isValidMinionType(minionType: string): boolean
-	local template = getMinionTemplate(minionType)
-	return template ~= nil
-end
-
 function MinionService.getFollowerCount(player: Player): number
 	local playerFollowers = followers[player]
 	return if playerFollowers ~= nil then #playerFollowers else 0
@@ -373,9 +368,11 @@ function MinionService.refreshFollowerEnergyValues(player: Player)
 end
 
 -- Server-only count changes. Added/removed followers also add/remove the combat
--- power represented by their EnergyValue. Multiplication preserves type composition.
--- All additional sources are prepared before committing, so failure changes nothing.
-function MinionService.setFollowerCount(player: Player, target: number, minionType: string?): (boolean, number)
+-- power represented by their EnergyValue. Every addition copies the existing
+-- follower with the greatest order; an empty queue falls back to a valid unlocked
+-- template. All additional sources are prepared before committing, so failure
+-- changes nothing.
+function MinionService.setFollowerCount(player: Player, target: number): (boolean, number)
 	local playerFollowers = followers[player]
 	if playerFollowers == nil or player.Parent ~= Players or target ~= target
 		or target % 1 ~= 0 or target < 0 or target > GameplayConfig.Limits.MaxFollowersPerPlayer
@@ -385,21 +382,17 @@ function MinionService.setFollowerCount(player: Player, target: number, minionTy
 	local current = #playerFollowers
 	local powerChange = 0
 	if target > current then
-		local template: Instance? = nil
-		local minionTypeToAdd: string? = nil
-		local baseValue: number? = nil
-		local value: number? = nil
-		if minionType ~= nil then
-			if not PlayerShopService.isMinionUnlocked(player, minionType) then
-				return false, 0
-			end
-			template, baseValue = getMinionTemplate(minionType)
-			value = PlayerShopService.getMinionEnergyValue(player, minionType, baseValue)
-			minionTypeToAdd = minionType
-			if template == nil or baseValue == nil or value == nil then
-				return false, 0
-			end
-		elseif current == 0 then
+		local template: Instance?
+		local minionTypeToAdd: string?
+		local baseValue: number?
+		local value: number?
+		if current > 0 then
+			local lastFollower = playerFollowers[current]
+			template = lastFollower.instance
+			minionTypeToAdd = lastFollower.minionType
+			baseValue = lastFollower.baseValue
+			value = lastFollower.value
+		else
 			template, minionTypeToAdd, baseValue = getDefaultMinionTemplate(player)
 			if template ~= nil and minionTypeToAdd ~= nil and baseValue ~= nil then
 				value = PlayerShopService.getMinionEnergyValue(player, minionTypeToAdd, baseValue)
@@ -409,31 +402,20 @@ function MinionService.setFollowerCount(player: Player, target: number, minionTy
 			end
 		end
 		local prepared: { Follower } = {}
-		for index = 1, target - current do
-			local sourceTemplate = template
-			local sourceMinionType = minionTypeToAdd
-			local sourceBaseValue = baseValue
-			local sourceValue = value
-			if sourceTemplate == nil then
-				local original = playerFollowers[(index - 1) % current + 1]
-				sourceTemplate = original.instance
-				sourceMinionType = original.minionType
-				sourceBaseValue = original.baseValue
-				sourceValue = original.value
-			end
-			local source = cloneFollowerSource(sourceTemplate)
+		for _ = 1, target - current do
+			local source = cloneFollowerSource(template :: Instance)
 			if source == nil then
 				for _, follower in prepared do
 					follower.instance:Destroy()
 				end
-				warn("[MinionService] unable to clone follower source", sourceTemplate)
+				warn("[MinionService] unable to clone follower source", template)
 				return false, 0
 			end
 			table.insert(prepared, {
 				instance = source,
-				minionType = sourceMinionType :: string,
-				baseValue = sourceBaseValue :: number,
-				value = sourceValue :: number,
+				minionType = minionTypeToAdd :: string,
+				baseValue = baseValue :: number,
+				value = value :: number,
 				order = 0,
 			})
 		end

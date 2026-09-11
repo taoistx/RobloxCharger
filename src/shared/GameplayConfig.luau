@@ -14,6 +14,7 @@ GameplayConfig.Tags = {
 	Shop = "Shop",
 	EnergyCapacityUpgrade = "EnergyCapacityUpgrade",
 	Treadmill = "Treadmill",
+	FinalZone = "FinalZone",
 	-- 仅用于开发期能量验证的独立触碰 Part，不参与小兵或成长系统。
 	TestEnergyReward = "TestEnergyReward",
 }
@@ -101,6 +102,19 @@ GameplayConfig.InstanceNames = {
 	ShopOpenRequested = "ShopOpenRequested",
 	EnergyCapacityUpgradeFeedback = "EnergyCapacityUpgradeFeedback",
 	TreadmillPromptPurchase = "TreadmillPromptPurchase",
+	FinalCelebration = "FinalCelebration",
+}
+
+GameplayConfig.Final = {
+	-- 终点音效接近播放完毕后，由服务端执行清场和传送。
+	CelebrationDurationSeconds = 2,
+	Celebration = {
+		-- Creator Store: APMOfficial / Early Bird - Hit1（约 2 秒）。
+		SoundId = "rbxassetid://9040476898",
+		SoundVolume = 0.7,
+		R6AnimationId = "rbxassetid://129423030",
+		R15AnimationId = "rbxassetid://507770677",
+	},
 }
 
 GameplayConfig.Defaults = {

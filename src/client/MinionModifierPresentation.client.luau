@@ -64,7 +64,7 @@ local function bind(instance: Instance)
 			label.TextColor3 = if reduces then Color3.fromRGB(255, 95, 100) else Color3.fromRGB(85, 235, 145)
 		end
 	end
-	for _, name in { ATTRIBUTE.Operation, ATTRIBUTE.Operand, ATTRIBUTE.MinionType, ATTRIBUTE.Enabled } do
+	for _, name in { ATTRIBUTE.Operation, ATTRIBUTE.Operand, ATTRIBUTE.Enabled } do
 		table.insert(binding.connections, instance:GetAttributeChangedSignal(name):Connect(refresh))
 	end
 	for _, name in { "Size", "Anchored", "CanTouch" } do

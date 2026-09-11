@@ -11,7 +11,8 @@
 	MinionPicker-tagged descendants authored under a GameZone at server startup are
 	used as fixed-position presets. They count toward MinionSpawnCount, and only
 	the remaining difference is placed randomly. Presets take priority when their
-	count exceeds MinionSpawnCount. A count of -1 disables both kinds.
+	count exceeds MinionSpawnCount. A preset with no MinionType chooses a random
+	unlocked type for each player. A count of -1 disables both kinds.
 
 	Templates: direct children of ServerStorage/MinionTemplates; if that folder is
 	absent, tagged direct children of ServerStorage are accepted for compatibility.
@@ -329,8 +330,12 @@ local function cacheAuthoredPickups()
 			continue
 		end
 		local minionType = pickup:GetAttribute(ATTRIBUTE.MinionType)
-		if typeof(minionType) ~= "string" or minionType == "" or not hasMinionTemplate(minionType) then
-			warn("[MinionSpawnService] authored pickup requires a valid MinionType", pickup)
+		if minionType ~= nil and typeof(minionType) ~= "string" then
+			warn("[MinionSpawnService] authored pickup MinionType must be a string when configured", pickup)
+			continue
+		end
+		if typeof(minionType) == "string" and minionType ~= "" and not hasMinionTemplate(minionType) then
+			warn("[MinionSpawnService] authored pickup MinionType must match a MinionTemplates child", pickup)
 			continue
 		end
 		table.insert(candidates, { pickup = pickup, zone = zone, pivot = root:GetPivot() })
@@ -464,9 +469,16 @@ local function spawnZone(player: Player, zoneIndex: number)
 
 	for index, authoredPickup in definition.authoredPickups do
 		local authoredMinionType = authoredPickup.prototype:GetAttribute(ATTRIBUTE.MinionType)
-		if typeof(authoredMinionType) ~= "string"
-			or not PlayerShopService.isMinionUnlocked(player, authoredMinionType)
-		then
+		local authoredMinionTemplate: Instance?
+		if typeof(authoredMinionType) == "string" and authoredMinionType ~= "" then
+			if not PlayerShopService.isMinionUnlocked(player, authoredMinionType) then
+				continue
+			end
+			authoredMinionTemplate = findMinionTemplateByName(authoredMinionType)
+		else
+			authoredMinionTemplate = chooseRandomUnlockedTemplate(player, nil)
+		end
+		if authoredMinionTemplate == nil then
 			continue
 		end
 		local pickup = authoredPickup.prototype:Clone()
@@ -486,6 +498,7 @@ local function spawnZone(player: Player, zoneIndex: number)
 		end
 		root:PivotTo(authoredPickup.pivot)
 		pickup.Name = "AuthoredMinionPickup_" .. index
+		pickup:SetAttribute(ATTRIBUTE.MinionType, authoredMinionTemplate.Name)
 		pickup:SetAttribute(ATTRIBUTE.Collected, false)
 		pickup:SetAttribute(ATTRIBUTE.SpawnOwnerUserId, player.UserId)
 		pickup.Parent = folder

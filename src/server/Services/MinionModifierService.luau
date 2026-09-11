@@ -27,7 +27,6 @@ type Binding = {
 local MinionModifierService = {}
 local TAG = GameplayConfig.Tags.MinionModifier
 local ATTRIBUTE = GameplayConfig.Attributes
-local OPERATION = ModifierConfig.Operations
 local bindings: { [Instance]: Binding } = {}
 local playerConnections: { [Player]: RBXScriptConnection } = {}
 local started = false
@@ -43,13 +42,6 @@ local function refreshDefinition(binding: Binding)
 	if definition == nil then
 		warn("[MinionModifierService] " .. (reason or "invalid configuration"), part)
 		return
-	end
-	if definition.operation == OPERATION.Add then
-		local minionType = definition.minionType
-		if minionType == nil or not MinionService.isValidMinionType(minionType) then
-			warn("[MinionModifierService] MinionType must reference a valid server template", part)
-			return
-		end
 	end
 	binding.definition = definition
 end
@@ -88,8 +80,7 @@ local function onTouched(binding: Binding, touchedPart: BasePart)
 	binding.lastAttempt[player] = now
 	local before = MinionService.getFollowerCount(player)
 	local target = ModifierConfig.getTargetCount(before, definition)
-	local minionType = if definition.operation == OPERATION.Add then definition.minionType else nil
-	local success, powerChange = MinionService.setFollowerCount(player, target, minionType)
+	local success, powerChange = MinionService.setFollowerCount(player, target)
 	if not success then
 		return
 	end
@@ -151,7 +142,7 @@ local function bind(instance: Instance)
 	}
 	bindings[instance] = binding
 	refresh(binding)
-	for _, name in { ATTRIBUTE.Operation, ATTRIBUTE.Operand, ATTRIBUTE.MinionType, ATTRIBUTE.Enabled } do
+	for _, name in { ATTRIBUTE.Operation, ATTRIBUTE.Operand, ATTRIBUTE.Enabled } do
 		table.insert(binding.connections, instance:GetAttributeChangedSignal(name):Connect(function()
 			refresh(binding)
 		end))

@@ -3,13 +3,12 @@
 -- MinionModifier tag: an anchored BasePart in Workspace with CanTouch = true.
 -- Required: Operation = "Add", "Subtract", or "Multiply"; Operand = integer.
 -- Add/Subtract Operand: 1..1,000. Multiply Operand: 0..10.
--- Optional for Add: MinionType names a server minion template; defaults to rabbit.
 -- Optional: Enabled: boolean, default true. No other attributes are required.
 -- Each player can use each part once per character life, including no-op results.
 -- MinionModifier Tag 必须放在 Workspace 中已锚定且 CanTouch = true 的 BasePart 上。
 -- Operation 必须为 Add、Subtract 或 Multiply；Operand 必须为整数。
 -- Add/Subtract 的 Operand 范围为 1..1,000，Multiply 的 Operand 范围为 0..10。
--- Add 可选 MinionType，填写服务端兵种模板名；未填写时默认为 rabbit。
+-- Add 和 Multiply 新增的士兵全部复制玩家当前序号最后的跟随士兵。
 -- Enabled 可选，类型为 boolean，默认开启；每名玩家每条命每个门只能使用一次。
 
 local GameplayConfig = require(script.Parent:WaitForChild("GameplayConfig"))
@@ -17,7 +16,6 @@ local GameplayConfig = require(script.Parent:WaitForChild("GameplayConfig"))
 export type Definition = {
 	operation: string,
 	operand: number,
-	minionType: string?,
 	enabled: boolean,
 }
 
@@ -30,9 +28,6 @@ MinionModifierConfig.Operations = {
 	Subtract = "Subtract",
 	Multiply = "Multiply",
 }
-
--- 数量门未设置 MinionType 时，Add 操作默认增加的兵种模板名称。
-MinionModifierConfig.DefaultAddMinionType = "rabbit"
 
 -- Add/Subtract 操作数允许的最大整数值。
 MinionModifierConfig.MaxOperand = 1000
@@ -84,18 +79,9 @@ function MinionModifierConfig.read(instance: Instance): (Definition?, string?)
 	if enabled ~= nil and typeof(enabled) ~= "boolean" then
 		return nil, "Enabled must be a boolean"
 	end
-	local minionType = instance:GetAttribute(ATTRIBUTE.MinionType)
-	if operation == OPERATION.Add then
-		if minionType == nil or minionType == "" then
-			minionType = MinionModifierConfig.DefaultAddMinionType
-		elseif typeof(minionType) ~= "string" then
-			return nil, "Add MinionType must be a string when configured"
-		end
-	end
 	return {
 		operation = operation :: string,
 		operand = operand,
-		minionType = if typeof(minionType) == "string" then minionType else nil,
 		enabled = enabled ~= false,
 	}, nil
 end
@@ -128,7 +114,6 @@ local function copyEffect(effect: { operation: string, operand: number }): Defin
 	return {
 		operation = effect.operation,
 		operand = effect.operand,
-		minionType = if effect.operation == OPERATION.Add then MinionModifierConfig.DefaultAddMinionType else nil,
 		enabled = true,
 	}
 end

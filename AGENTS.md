@@ -31,6 +31,7 @@ Charger/
 │  │     ├─ BossService.luau
 │  │     ├─ DemoArenaService.luau
 │  │     ├─ EnergyCapacityUpgradeService.luau
+│  │     ├─ FinalZoneService.luau
 │  │     ├─ GameplayUtil.luau
 │  │     ├─ ForcedRunService.luau
 │  │     ├─ MinionModifierService.luau
@@ -49,6 +50,7 @@ Charger/
 │     ├─ CoinPresentation.client.luau
 │     ├─ EnergyCapacityUpgradePresentation.client.luau
 │     ├─ EnergyHud.client.luau
+│     ├─ FinalCelebrationPresentation.client.luau
 │     ├─ ForcedRunController.client.luau
 │     ├─ MinionPickupPresentation.client.luau
 │     ├─ MinionModifierPresentation.client.luau
@@ -62,6 +64,7 @@ Charger/
 │  ├─ DecoratePetCastle.luau
 │  └─ UI_GAMEPLAY_CONCEPT.md
 ├─ assets/
+│  ├─ DecorateLevels5To9.luau  # level5～9 编辑态场景装饰重建脚本
 │  ├─ wooden+nutcracker+3d+model/
 │  ├─ wooden+nutcracker+3d+model500/
 │  └─ *.blend / *.blend1 / *.glb
@@ -75,10 +78,11 @@ Charger/
 
 - `src/shared` 保存客户端与服务端共用的标签、属性、玩法参数、商店参数和配置校验。
 - `src/server/GameplayBootstrap.server.luau` 是服务端入口，统一启动 `src/server/Services` 下的权威玩法服务。
-- `src/server/Services` 保存玩家成长、订阅权益、商店与游戏币、能量上限升级区域、强制前进、跑步机、士兵生成与队列、数量修改器、陷阱、即死区域、Boss、演示场景及通用实例工具。
-- `src/client` 保存 HUD、商店与金币反馈界面、跑步机购买提示、Boss 玩家隔离与反馈、成长反馈、士兵跟随及数量修改器等客户端表现。
+- `src/server/Services` 保存玩家成长、订阅权益、商店与游戏币、能量上限升级区域、强制前进、跑步机、终点结算、士兵生成与队列、数量修改器、陷阱、即死区域、Boss、演示场景及通用实例工具。
+- `src/client` 保存 HUD、商店与金币反馈界面、跑步机购买提示、终点庆祝、Boss 玩家隔离与反馈、成长反馈、士兵跟随及数量修改器等客户端表现。
 - `docs` 保存玩法概念、演示构建脚本和视觉参考；`配置说明.md` 保存玩法对象的配置与使用说明。
 - `assets`、`Scene.rbxmx` 和 `SoliderMinion.rbxm` 是场景与美术源资源，不在当前 Rojo 源码映射中。
+- `Assets/DecorateLevels5To9.luau` 仅在 Studio 编辑态执行，生成 `Workspace/PetCastleDecor/07_Levels5To9` 和 `Workspace/PetCastleDecor/TracksideDecor/07_Levels5To9`；赛道两旁装饰统一放入 `TracksideDecor`，不得将此脚本作为运行时 Script 安装。
 - 新增、删除或移动上述主要模块和目录时，应同步更新本节。
 
 ### 跑动能量结算
@@ -99,7 +103,7 @@ Charger/
 ### GameZone 预置 MinionPicker
 
 - 服务器启动时，`MinionSpawnService` 会收集每个 `GameZone` 后代中已有且带 `MinionPicker` Tag 的有效对象，作为固定位置预置。
-- 预置对象必须是 `BasePart` 或包含 `BasePart` 的 `Model`，并设置有效的 `MinionType`；该名称必须精确匹配 `ServerStorage/MinionTemplates` 的直接子对象。
+- 预置对象必须是 `BasePart` 或包含 `BasePart` 的 `Model`。`MinionType` 可不设置或设为空字符串，此时为每名玩家的运行时副本随机选择一个已解锁兵种；非空时必须精确匹配 `ServerStorage/MinionTemplates` 的直接子对象。
 - 场景中的预置原件只作为位置与外观原型。启动后服务会将原件移出 DataModel，并为每名玩家、每次出生在原位置创建带 `SpawnOwnerUserId` 的独立副本；因此运行时在原层级看不到预置原件属于正常行为。
 - `GameZone.MinionSpawnCount` 是每名玩家在该区域的目标数量。有效预置数小于目标时，只随机补足差值；预置数大于目标时保留全部预置且不再随机生成。
 - 预置数超过目标数的提示只允许在 `RunService:IsStudio()` 时输出，不得污染发布服务器日志或改变发布运行逻辑。

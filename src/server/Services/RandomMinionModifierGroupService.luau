@@ -220,8 +220,7 @@ local function onSlotTouched(binding: GroupBinding, slot: BasePart, touchedPart:
 	end
 	local before = MinionService.getFollowerCount(player)
 	local target = ModifierConfig.getTargetCount(before, definition)
-	local minionType = if definition.operation == ModifierConfig.Operations.Add then definition.minionType else nil
-	local success, powerChange = MinionService.setFollowerCount(player, target, minionType)
+	local success, powerChange = MinionService.setFollowerCount(player, target)
 	if not success then
 		return
 	end
