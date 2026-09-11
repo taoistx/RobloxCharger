@@ -238,48 +238,23 @@ end
 
 local render: () -> () = function() end
 
-local function createCapacityCard(parent: Instance)
-	local card = makeCard(parent, 104)
-
-	local name = Instance.new("TextLabel")
-	name.Size = UDim2.new(1, -160, 0, 28)
-	name.Position = UDim2.fromOffset(14, 12)
-	name.BackgroundTransparency = 1
-	name.TextXAlignment = Enum.TextXAlignment.Left
-	name.Text = "能量上限"
-	name.TextColor3 = Color3.fromRGB(239, 250, 255)
-	name.Font = Enum.Font.GothamBlack
-	name.TextSize = 19
-	name.Parent = card
-
-	local details = Instance.new("TextLabel")
-	details.Size = UDim2.new(1, -170, 0, 42)
-	details.Position = UDim2.fromOffset(14, 44)
-	details.BackgroundTransparency = 1
-	details.TextXAlignment = Enum.TextXAlignment.Left
-	details.TextYAlignment = Enum.TextYAlignment.Top
-	details.Text = string.format("+%d 容量 · 等级 %d", snapshot.capacityBonus or 0, snapshot.capacityUpgradeLevel or 0)
-	details.TextColor3 = Color3.fromRGB(178, 210, 223)
-	details.Font = Enum.Font.GothamMedium
-	details.TextSize = 14
-	details.Parent = card
-
-	local cost = snapshot.capacityUpgradeCost
-	local button = makeButton(card, "升级\n" .. formatCost(cost), Color3.fromRGB(29, 139, 108), cost ~= nil)
-	button.AnchorPoint = Vector2.new(1, 0.5)
-	button.Position = UDim2.new(1, -14, 0.5, 0)
-	button.Activated:Connect(function()
-		purchase(ACTION.UpgradeEnergyCapacity, nil)
-		render()
-	end)
-end
-
 local function createMinionCard(parent: Instance, minion: any)
 	local card = makeCard(parent, 124)
 
+	local icon = Instance.new("ImageLabel")
+	icon.Name = "MinionIcon"
+	icon.Size = UDim2.fromOffset(76, 76)
+	icon.Position = UDim2.fromOffset(14, 24)
+	icon.BackgroundColor3 = Color3.fromRGB(18, 26, 36)
+	icon.Image = if typeof(minion.iconImage) == "string" then minion.iconImage else ""
+	icon.ScaleType = Enum.ScaleType.Fit
+	icon.Parent = card
+	makeCorner(icon, 8)
+	makeStroke(icon, Color3.fromRGB(66, 91, 111), 0.45)
+
 	local name = Instance.new("TextLabel")
-	name.Size = UDim2.new(1, -170, 0, 28)
-	name.Position = UDim2.fromOffset(14, 12)
+	name.Size = UDim2.new(1, -260, 0, 28)
+	name.Position = UDim2.fromOffset(104, 12)
 	name.BackgroundTransparency = 1
 	name.TextXAlignment = Enum.TextXAlignment.Left
 	name.Text = tostring(minion.displayName or minion.minionType)
@@ -292,10 +267,12 @@ local function createMinionCard(parent: Instance, minion: any)
 	local currentEnergy = math.floor(minion.currentEnergy or 0)
 	local detailText: string
 	if unlocked and minion.upgradeCost ~= nil then
+		local energyUpgradePerLevel = math.floor(minion.energyUpgradePerLevel or 0)
+		local nextEnergy = math.min(currentEnergy + energyUpgradePerLevel, GameplayConfig.Limits.MaxEnergyValue)
 		detailText = string.format(
 			"已解锁 · 能量 %d -> %d · 升级 %d",
 			currentEnergy,
-			currentEnergy + ShopConfig.MinionEnergyUpgrades.EnergyPerLevel,
+			nextEnergy,
 			math.floor(minion.upgradeLevel or 0)
 		)
 	elseif unlocked then
@@ -304,8 +281,8 @@ local function createMinionCard(parent: Instance, minion: any)
 		detailText = string.format("未解锁 · 基础能量 %d", math.floor(minion.baseEnergy or 0))
 	end
 	local details = Instance.new("TextLabel")
-	details.Size = UDim2.new(1, -170, 0, 42)
-	details.Position = UDim2.fromOffset(14, 42)
+	details.Size = UDim2.new(1, -260, 0, 58)
+	details.Position = UDim2.fromOffset(104, 42)
 	details.BackgroundTransparency = 1
 	details.TextXAlignment = Enum.TextXAlignment.Left
 	details.TextYAlignment = Enum.TextYAlignment.Top
@@ -378,7 +355,6 @@ render = function()
 	end
 
 	coinsLabel.Text = "Coins: " .. tostring(math.floor(snapshot.coins or 0))
-	createCapacityCard(list)
 	if typeof(snapshot.minions) == "table" then
 		for _, minion in snapshot.minions do
 			createMinionCard(list, minion)

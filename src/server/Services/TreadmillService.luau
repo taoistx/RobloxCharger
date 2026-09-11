@@ -3,8 +3,8 @@
 --[[
 	Binds tagged treadmill Models. A model named "x15 Treadmill" grants the
 	base reward at x15 while a living player stands on its Conveyor part.
-	x15 and higher tiers require an owned Game Pass. Occupancy, ownership, and
-	coin grants are all validated by the server.
+	x3, x15, and x50 require their configured one-time Game Pass. Occupancy,
+	ownership, and coin grants are all validated by the server.
 
 	Tag: Treadmill
 	Accepted Instance: Model containing a BasePart named Conveyor
@@ -187,10 +187,9 @@ local function unbind(instance: Instance)
 end
 
 local function configurePrompt(prompt: ProximityPrompt, multiplier: number)
-	local expectedPrice = TreadmillConfig.getExpectedRobuxPrice(multiplier)
-	prompt.ActionText = if expectedPrice ~= nil
-		then "解锁 x" .. multiplier .. " · " .. expectedPrice .. " Robux"
-		else "解锁 x" .. multiplier
+	-- The native purchase prompt shows the player's current managed/regional price.
+	-- Avoid hard-coding a Robux amount into this shared world prompt.
+	prompt.ActionText = "永久解锁 x" .. multiplier
 	prompt.ObjectText = TreadmillConfig.Prompt.ObjectText
 	prompt.KeyboardKeyCode = TreadmillConfig.Prompt.KeyboardKeyCode
 	prompt.MaxActivationDistance = TreadmillConfig.Prompt.MaxActivationDistance
@@ -385,7 +384,6 @@ function TreadmillService.start()
 			player:SetAttribute(ATTRIBUTE.StatusMessage, "高倍率跑步机已解锁！")
 		end
 	end)
-
 	task.spawn(function()
 		local interval = math.max(0.1, TreadmillConfig.Rewards.AwardIntervalSeconds)
 		while started do

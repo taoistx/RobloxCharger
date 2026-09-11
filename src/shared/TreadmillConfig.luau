@@ -20,28 +20,21 @@ TreadmillConfig.Rewards = {
 	HorizontalInsetStuds = 0.35,
 }
 
--- 跑步机永久权限通过 Game Pass 销售；x1 免费，x3 及以上需要对应权限。
--- 达到此倍率及以上的跑步机需要匹配的 Game Pass；x1 免费。
+-- x1 免费；x3、x15、x50 通过一次性 Game Pass 永久解锁。
 TreadmillConfig.PaidMultiplierThreshold = 3
 TreadmillConfig.GamePassIdByMultiplier = {
-	-- 各倍率对应的 Game Pass ID；创建商品后将 0 替换为正整数。
-	[3] = 0,
-	[15] = 0,
-	[50] = 0,
+	-- 各倍率对应的 Game Pass ID，必须与 Creator Dashboard 中的通行证一致。
+	[3] = 1976612913, -- Gold Treadmill
+	[15] = 1979882458, -- Candy Treadmill
+	[50] = 1975304919, -- Jade Treadmill
 	[100] = 0,
-} :: { [number]: number }
-
--- 这里的价格只用于世界内提示，实际扣费以 Creator Dashboard 中的 Game Pass 定价为准。
-TreadmillConfig.RobuxPriceByMultiplier = {
-	-- 世界内提示使用的目标价格；实际价格以 Creator Dashboard 为准。
-	[3] = 500,
 } :: { [number]: number }
 
 TreadmillConfig.Prompt = {
 	-- 付费跑步机 ProximityPrompt 的实例名称。
 	Name = "TreadmillUnlockPrompt",
 	-- 玩家看到的交互对象文本。
-	ObjectText = "Robux Treadmill",
+	ObjectText = "永久解锁跑步机",
 	-- 打开购买框所需的键盘按键。
 	KeyboardKeyCode = Enum.KeyCode.E,
 	-- 玩家可以触发提示的最大距离（stud）。
@@ -73,14 +66,6 @@ function TreadmillConfig.getConfiguredGamePassId(multiplier: number): number?
 		return nil
 	end
 	return math.floor(gamePassId)
-end
-
-function TreadmillConfig.getExpectedRobuxPrice(multiplier: number): number?
-	local price = TreadmillConfig.RobuxPriceByMultiplier[multiplier]
-	if typeof(price) ~= "number" or price ~= price or price <= 0 then
-		return nil
-	end
-	return math.floor(price)
 end
 
 return TreadmillConfig

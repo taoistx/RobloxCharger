@@ -1,7 +1,7 @@
 --!strict
 
 --[[
-	Owns authoritative player shop state, coins, minion unlocks, and shop upgrades.
+	Owns authoritative player shop state, coins, minion unlocks, and upgrades.
 	Client requests only name an action and optional minion type; all prices,
 	unlocks, and upgrade effects are recalculated on the server.
 ]]
@@ -44,9 +44,11 @@ type SavedShop = {
 type MinionSnapshot = {
 	minionType: string,
 	displayName: string,
+	iconImage: string?,
 	unlocked: boolean,
 	baseEnergy: number,
 	currentEnergy: number,
+	energyUpgradePerLevel: number,
 	upgradeLevel: number,
 	upgradeCost: number?,
 	unlockCoinCost: number,
@@ -75,6 +77,7 @@ local TAG = GameplayConfig.Tags.Shop
 local ACTION = ShopConfig.PurchaseActions
 local PURCHASE_COOLDOWN_SECONDS = 0.15
 local SHOP_MODEL_NAME = "Shop"
+local MAX_SAFE_INTEGER = 9007199254740991
 
 local states: { [Player]: PlayerState } = {}
 local shopBindings: { [Instance]: ShopBinding } = {}
@@ -86,6 +89,8 @@ local purchaseRemote: RemoteFunction? = nil
 local updatedRemote: RemoteEvent? = nil
 local openRemote: RemoteEvent? = nil
 local coinAwardFeedbackRemote: RemoteEvent? = nil
+local invalidMinionUpgradeAttributeWarnings: { [Instance]: boolean } = {}
+local invalidMinionIconAttributeWarnings: { [Instance]: boolean } = {}
 
 local function getShopStore(): GlobalDataStore?
 	if shopStore ~= nil then
@@ -257,18 +262,83 @@ local function getTemplateBaseEnergy(minionType: string): number?
 	return energyValue
 end
 
+local function getTemplateEnergyUpgradePerLevel(minionType: string): number?
+	local template = getTemplateContainer():FindFirstChild(minionType)
+	if template == nil or GameplayUtil.getRoot(template) == nil then
+		return nil
+	end
+
+	local energyUpgradePerLevel = template:GetAttribute(ATTRIBUTE.EnergyUpgradePerLevel)
+	if typeof(energyUpgradePerLevel) ~= "number"
+		or energyUpgradePerLevel ~= energyUpgradePerLevel
+		or energyUpgradePerLevel % 1 ~= 0
+		or energyUpgradePerLevel < 1
+		or energyUpgradePerLevel > GameplayConfig.Limits.MaxEnergyValue
+	then
+		if not invalidMinionUpgradeAttributeWarnings[template] then
+			invalidMinionUpgradeAttributeWarnings[template] = true
+			warn(
+				"[PlayerShopService] Minion template requires EnergyUpgradePerLevel as an integer between 1 and "
+					.. GameplayConfig.Limits.MaxEnergyValue,
+				template
+			)
+		end
+		return nil
+	end
+
+	return energyUpgradePerLevel
+end
+
+local function getTemplateIconImage(minionType: string): string?
+	local template = getTemplateContainer():FindFirstChild(minionType)
+	if template == nil or GameplayUtil.getRoot(template) == nil then
+		return nil
+	end
+
+	local iconId = template:GetAttribute(ATTRIBUTE.MinionIconId)
+	if typeof(iconId) == "number"
+		and iconId == iconId
+		and iconId % 1 == 0
+		and iconId > 0
+		and iconId <= MAX_SAFE_INTEGER
+	then
+		return "rbxassetid://" .. string.format("%.0f", iconId)
+	end
+	if typeof(iconId) == "string" then
+		local digits = string.match(iconId, "^%s*(%d+)%s*$")
+		if digits ~= nil and #digits <= 20 and string.find(digits, "[1-9]") ~= nil then
+			return "rbxassetid://" .. digits
+		end
+	end
+
+	if not invalidMinionIconAttributeWarnings[template] then
+		invalidMinionIconAttributeWarnings[template] = true
+		warn(
+			"[PlayerShopService] Minion template requires MinionIconId as a positive integer or digit-only string asset ID",
+			template
+		)
+	end
+	return nil
+end
+
 local function getKnownMinionTypes(): { string }
 	local minionTypes: { string } = {}
 	local seen: { [string]: boolean } = {}
 	local container = getTemplateContainer()
 	for _, instance in container:GetChildren() do
-		if getTemplateBaseEnergy(instance.Name) ~= nil and not seen[instance.Name] then
+		if getTemplateBaseEnergy(instance.Name) ~= nil
+			and getTemplateEnergyUpgradePerLevel(instance.Name) ~= nil
+			and not seen[instance.Name]
+		then
 			seen[instance.Name] = true
 			table.insert(minionTypes, instance.Name)
 		end
 	end
 	for minionType in ShopConfig.Minions do
-		if not seen[minionType] and getTemplateBaseEnergy(minionType) ~= nil then
+		if not seen[minionType]
+			and getTemplateBaseEnergy(minionType) ~= nil
+			and getTemplateEnergyUpgradePerLevel(minionType) ~= nil
+		then
 			seen[minionType] = true
 			table.insert(minionTypes, minionType)
 		end
@@ -283,6 +353,10 @@ local function getGamePassId(minionType: string): number?
 		return math.floor(config.gamePassId)
 	end
 	return nil
+end
+
+local function hasPermanentMinionUnlock(state: PlayerState, minionType: string): boolean
+	return minionType == ShopConfig.DefaultUnlockedMinionType or state.unlockedMinionTypes[minionType] == true
 end
 
 local function getSafeNonNegativeInteger(value: unknown): number
@@ -438,22 +512,24 @@ local function buildSnapshot(player: Player): ShopSnapshot
 	local minions: { MinionSnapshot } = {}
 	for _, minionType in getKnownMinionTypes() do
 		local baseEnergy = getTemplateBaseEnergy(minionType)
-		if baseEnergy == nil then
+		local energyUpgradePerLevel = getTemplateEnergyUpgradePerLevel(minionType)
+		if baseEnergy == nil or energyUpgradePerLevel == nil then
 			continue
 		end
 		local upgradeLevel = sanitizeMinionUpgradeLevel(state.minionEnergyUpgradeLevels[minionType])
-		local unlocked = minionType == ShopConfig.DefaultUnlockedMinionType
-			or state.unlockedMinionTypes[minionType] == true
+		local unlocked = hasPermanentMinionUnlock(state, minionType)
 		table.insert(minions, {
 			minionType = minionType,
 			displayName = ShopConfig.getMinionDisplayName(minionType),
+			iconImage = getTemplateIconImage(minionType),
 			unlocked = unlocked,
 			baseEnergy = math.floor(baseEnergy),
 			currentEnergy = math.floor(math.clamp(
-				baseEnergy + ShopConfig.getMinionEnergyBonus(upgradeLevel),
+				baseEnergy + ShopConfig.getMinionEnergyBonus(upgradeLevel, energyUpgradePerLevel),
 				1,
 				GameplayConfig.Limits.MaxEnergyValue
 			)),
+			energyUpgradePerLevel = energyUpgradePerLevel,
 			upgradeLevel = upgradeLevel,
 			upgradeCost = ShopConfig.getMinionUpgradeCost(minionType, upgradeLevel),
 			unlockCoinCost = ShopConfig.getMinionUnlockCost(minionType),
@@ -605,29 +681,15 @@ local function onPurchaseRequested(player: Player, actionValue: unknown, minionT
 	end
 
 	local action = actionValue
-	if action == ACTION.UpgradeEnergyCapacity then
-		local level = sanitizeCapacityUpgradeLevel(state.capacityUpgradeLevel)
-		local cost = ShopConfig.getCapacityUpgradeCost(level)
-		if cost == nil then
-			return makeResponse(player, false, "能量上限已达到最高等级。")
-		end
-		if not PlayerShopService.spendCoins(player, cost) then
-			return makeResponse(player, false, "游戏币不足。")
-		end
-		state.capacityUpgradeLevel = level + 1
-		markDirty(state)
-		syncAttributes(player, state)
-		player:SetAttribute(ATTRIBUTE.StatusMessage, "能量上限已提升！")
-		notifyPlayer(player)
-		task.spawn(savePlayer, player)
-		return makeResponse(player, true, "能量上限已提升。")
+	if action ~= ACTION.UnlockMinion and action ~= ACTION.UpgradeMinionEnergy then
+		return makeResponse(player, false, "无效的购买操作。")
 	end
 
 	if typeof(minionTypeValue) ~= "string" or minionTypeValue == "" then
 		return makeResponse(player, false, "请选择有效的小兵。")
 	end
 	local minionType = minionTypeValue
-	if getTemplateBaseEnergy(minionType) == nil then
+	if getTemplateBaseEnergy(minionType) == nil or getTemplateEnergyUpgradePerLevel(minionType) == nil then
 		return makeResponse(player, false, "小兵配置不存在。")
 	end
 
@@ -741,6 +803,51 @@ function PlayerShopService.spendCoins(player: Player, amount: number): boolean
 	return true
 end
 
+-- Server-only entry point used by EnergyCapacityUpgradeService. The touching
+-- client never supplies a price or level; both are resolved from trusted state.
+function PlayerShopService.tryUpgradeEnergyCapacity(player: Player): (boolean, string)
+	local state = getStateForPurchase(player)
+	if state == nil then
+		local message = "商店数据加载中，请稍后重新站上升级区域。"
+		player:SetAttribute(ATTRIBUTE.StatusMessage, message)
+		return false, message
+	end
+
+	local level = sanitizeCapacityUpgradeLevel(state.capacityUpgradeLevel)
+	local cost = ShopConfig.getCapacityUpgradeCost(level)
+	if cost == nil then
+		local message = "能量上限已达到最高等级。"
+		player:SetAttribute(ATTRIBUTE.StatusMessage, message)
+		return false, message
+	end
+	if not PlayerShopService.spendCoins(player, cost) then
+		local message = "游戏币不足：升级能量上限需要 " .. cost .. " Coins。"
+		player:SetAttribute(ATTRIBUTE.StatusMessage, message)
+		return false, message
+	end
+
+	local energyBeforeUpgrade = player:GetAttribute(ATTRIBUTE.CurrentEnergy)
+	local preservedEnergy = if typeof(energyBeforeUpgrade) == "number" and energyBeforeUpgrade == energyBeforeUpgrade
+		then math.max(0, energyBeforeUpgrade)
+		else 0
+	state.capacityUpgradeLevel = level + 1
+	markDirty(state)
+	syncAttributes(player, state)
+	-- Capacity attribute listeners normally preserve energy as well. Writing the
+	-- snapshot explicitly closes ordering gaps and guarantees an upgrade never
+	-- grants current energy. Invalid over-cap values are clamped to the old/new cap.
+	local capacity = player:GetAttribute(ATTRIBUTE.EnergyCapacity)
+	if typeof(capacity) == "number" and capacity == capacity and capacity > 0 then
+		preservedEnergy = math.min(preservedEnergy, capacity)
+	end
+	player:SetAttribute(ATTRIBUTE.CurrentEnergy, preservedEnergy)
+	local message = "已花费 " .. cost .. " Coins，能量上限已提升！"
+	player:SetAttribute(ATTRIBUTE.StatusMessage, message)
+	notifyPlayer(player)
+	task.spawn(savePlayer, player)
+	return true, message
+end
+
 function PlayerShopService.isMinionUnlocked(player: Player, minionType: string): boolean
 	if minionType == ShopConfig.DefaultUnlockedMinionType then
 		return true
@@ -766,14 +873,19 @@ end
 
 function PlayerShopService.getMinionEnergyValue(player: Player, minionType: string, baseEnergy: number?): number?
 	local baseValue = baseEnergy or getTemplateBaseEnergy(minionType)
-	if baseValue == nil then
+	local energyUpgradePerLevel = getTemplateEnergyUpgradePerLevel(minionType)
+	if baseValue == nil or energyUpgradePerLevel == nil then
 		return nil
 	end
 	local state = states[player]
 	local upgradeLevel = if state ~= nil and state.loaded
 		then sanitizeMinionUpgradeLevel(state.minionEnergyUpgradeLevels[minionType])
 		else 0
-	return math.clamp(baseValue + ShopConfig.getMinionEnergyBonus(upgradeLevel), 1, GameplayConfig.Limits.MaxEnergyValue)
+	return math.clamp(
+		baseValue + ShopConfig.getMinionEnergyBonus(upgradeLevel, energyUpgradePerLevel),
+		1,
+		GameplayConfig.Limits.MaxEnergyValue
+	)
 end
 
 function PlayerShopService.getCapacityBonus(player: Player): number
@@ -823,7 +935,6 @@ function PlayerShopService.start()
 			unlockMinionFromGamePassId(player, gamePassId)
 		end
 	end)
-
 	for _, player in Players:GetPlayers() do
 		bindPlayer(player)
 	end

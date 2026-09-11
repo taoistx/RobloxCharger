@@ -12,7 +12,10 @@ GameplayConfig.Tags = {
 	KillZone = "KillZone",
 	Boss = "Boss",
 	Shop = "Shop",
+	EnergyCapacityUpgrade = "EnergyCapacityUpgrade",
 	Treadmill = "Treadmill",
+	-- 仅用于开发期能量验证的独立触碰 Part，不参与小兵或成长系统。
+	TestEnergyReward = "TestEnergyReward",
 }
 
 GameplayConfig.Attributes = {
@@ -35,6 +38,10 @@ GameplayConfig.Attributes = {
 	BossImpactSequence = "BossImpactSequence",
 	BossOwnerUserId = "BossOwnerUserId",
 	EnergyValue = "EnergyValue",
+	-- Minion 模板每购买一级商店能量升级所增加的能量。
+	EnergyUpgradePerLevel = "EnergyUpgradePerLevel",
+	-- Minion 模板在商店卡片中显示的图片资源 ID。
+	MinionIconId = "MinionIconId",
 	EnergyDamage = "EnergyDamage",
 	MinionType = "MinionType",
 	Operation = "Operation",
@@ -92,6 +99,7 @@ GameplayConfig.InstanceNames = {
 	ShopPurchase = "ShopPurchase",
 	ShopUpdated = "ShopUpdated",
 	ShopOpenRequested = "ShopOpenRequested",
+	EnergyCapacityUpgradeFeedback = "EnergyCapacityUpgradeFeedback",
 	TreadmillPromptPurchase = "TreadmillPromptPurchase",
 }
 
@@ -100,14 +108,14 @@ GameplayConfig.Defaults = {
 	PlayerLevel = 1,
 	-- 玩家死亡后由 GameplayBootstrap 写入 Players.RespawnTime 的重生间隔（秒）。
 	PlayerRespawnSeconds = 0.5,
-	-- 玩家基础战力容量；当前容量公式为基础容量加商店升级加成。
-	BaseCapacity = 100,
+	-- 玩家基础战力容量；当前容量公式为基础容量加 EnergyCapacityUpgrade 区域购买的升级加成。
+	BaseCapacity = 50,
 	-- 预留的等级容量增量配置；当前容量不再按等级增长。
 	CapacityPerLevel = 100,
 	-- 每个完整跑动距离结算段换算的战力（战力/stud）。
 	EnergyPerStud = 0,
 	-- 累计多少 studs 才结算一份跑动战力，未满部分保留到下一次跑动。
-	DistancePerEnergyAward = 10,
+	DistancePerEnergyAward = 1000,
 	-- 玩家位于 GameZone 但没有有效跑动时每秒消耗的战力。
 	IdleEnergyDrainPerSecond = 0,
 	-- 未单独配置士兵模板 EnergyValue 时的保留默认战力。

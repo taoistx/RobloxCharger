@@ -2,6 +2,8 @@
 
 -- Player-local presentation for RandomMinionModifierGroup. The server owns each
 -- character's assignment and all gameplay; this script only requests and renders it.
+-- A group consumed by this player is hidden locally until their next character
+-- receives a fresh assignment; it remains visible and usable for other players.
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
@@ -37,6 +39,8 @@ type GroupBinding = {
 	visualConnections: { RBXScriptConnection },
 	connections: { RBXScriptConnection },
 	requestSerial: number,
+	hidden: boolean,
+	hiddenSurfaceGuiEnabled: { [SurfaceGui]: boolean },
 }
 
 local TAG = GameplayConfig.Tags.RandomMinionModifierGroup
@@ -52,6 +56,54 @@ local POSITIVE_COLOR = Color3.fromRGB(65, 205, 95)
 local NEGATIVE_COLOR = Color3.fromRGB(230, 70, 75)
 local MINION_ICON = "rbxassetid://91566702509972"
 local ICON_WIDTH_SHARE = 0.42
+
+local function isSlotDescendant(binding: GroupBinding, descendant: Instance): boolean
+	if descendant:IsA("BasePart") then
+		return descendant.Parent == binding.model
+	end
+	local ancestorPart = descendant:FindFirstAncestorWhichIsA("BasePart")
+	return ancestorPart ~= nil and ancestorPart.Parent == binding.model
+end
+
+local function hideDescendant(binding: GroupBinding, descendant: Instance)
+	if not isSlotDescendant(binding, descendant) then
+		return
+	end
+	if descendant:IsA("BasePart") then
+		descendant.LocalTransparencyModifier = 1
+	elseif descendant:IsA("SurfaceGui") then
+		if binding.hiddenSurfaceGuiEnabled[descendant] == nil then
+			binding.hiddenSurfaceGuiEnabled[descendant] = descendant.Enabled
+		end
+		descendant.Enabled = false
+	end
+end
+
+local function setGroupHidden(binding: GroupBinding, hidden: boolean)
+	if hidden then
+		binding.hidden = true
+		for _, descendant in binding.model:GetDescendants() do
+			hideDescendant(binding, descendant)
+		end
+		return
+	end
+
+	binding.hidden = false
+	-- Visibility restoration must not depend on the hide-time cache. A slot can
+	-- be rebound or streamed while the player is passing several groups, so
+	-- always reconcile every currently present slot to its visible local state.
+	for _, descendant in binding.model:GetDescendants() do
+		if descendant:IsA("BasePart") and descendant.Parent == binding.model then
+			descendant.LocalTransparencyModifier = 0
+		end
+	end
+	for surfaceGui, originalEnabled in binding.hiddenSurfaceGuiEnabled do
+		if surfaceGui.Parent ~= nil then
+			surfaceGui.Enabled = originalEnabled
+		end
+	end
+	table.clear(binding.hiddenSurfaceGuiEnabled)
+end
 
 local function restoreVisual(visual: SlotVisual)
 	if visual.part.Parent ~= nil then
@@ -181,8 +233,10 @@ local function renderResponse(binding: GroupBinding, response: any, expectedChar
 	end
 	clearVisuals(binding)
 	if response.consumed == true then
+		setGroupHidden(binding, true)
 		return true
 	end
+	setGroupHidden(binding, false)
 	for _, entry in response.entries do
 		if typeof(entry) ~= "table" then
 			continue
@@ -211,6 +265,7 @@ local function requestAssignment(binding: GroupBinding)
 	binding.requestSerial += 1
 	local serial = binding.requestSerial
 	clearVisuals(binding)
+	setGroupHidden(binding, false)
 	local character = player.Character
 	if character == nil then
 		return
@@ -251,6 +306,7 @@ local function unbind(instance: Instance)
 	for _, connection in binding.connections do
 		connection:Disconnect()
 	end
+	setGroupHidden(binding, false)
 	clearVisuals(binding)
 end
 
@@ -265,6 +321,8 @@ local function bind(instance: Instance)
 		visualConnections = {},
 		connections = {},
 		requestSerial = 0,
+		hidden = false,
+		hiddenSurfaceGuiEnabled = {},
 	}
 	bindings[instance] = binding
 	local function scheduleRequest()
@@ -274,7 +332,12 @@ local function bind(instance: Instance)
 			end
 		end)
 	end
-	table.insert(binding.connections, instance.DescendantAdded:Connect(scheduleRequest))
+	table.insert(binding.connections, instance.DescendantAdded:Connect(function(descendant)
+		if binding.hidden then
+			hideDescendant(binding, descendant)
+		end
+		scheduleRequest()
+	end))
 	table.insert(binding.connections, instance.DescendantRemoving:Connect(scheduleRequest))
 	table.insert(binding.connections, instance.AncestryChanged:Connect(scheduleRequest))
 	table.insert(binding.connections, instance.Destroying:Connect(function()
@@ -297,6 +360,7 @@ updateRemote.OnClientEvent:Connect(function(groupValue: unknown, characterValue:
 	if consumedValue == true then
 		binding.requestSerial += 1
 		clearVisuals(binding)
+		setGroupHidden(binding, true)
 	else
 		requestAssignment(binding)
 	end
@@ -306,11 +370,15 @@ player.CharacterRemoving:Connect(function()
 	for _, binding in bindings do
 		binding.requestSerial += 1
 		clearVisuals(binding)
+		setGroupHidden(binding, false)
 	end
 end)
 
 player.CharacterAdded:Connect(function()
 	for _, binding in bindings do
+		-- Do not wait for the RemoteFunction round trip before undoing the
+		-- previous character's local-only transparency.
+		setGroupHidden(binding, false)
 		requestAssignment(binding)
 	end
 end)

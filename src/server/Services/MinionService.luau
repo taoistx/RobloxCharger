@@ -5,7 +5,9 @@
 	MinionPicker tag: BasePart or Model (a Model must contain a BasePart).
 	Required pickup attribute: MinionType: string, matching the exact name of a
 	direct child of ServerStorage/MinionTemplates (or ServerStorage in legacy places).
-	Required minion-template attribute: EnergyValue: number, range 1..1,000,000.
+	Required minion-template attributes: EnergyValue: number in the range
+	1..1,000,000; EnergyUpgradePerLevel: integer in the same range. The latter
+	controls that minion type's energy gained per shop upgrade level.
 	Optional attributes: Collected: boolean (runtime, defaults false);
 	SpawnOwnerUserId: number (runtime, only this player may collect the pickup).
 
@@ -347,13 +349,22 @@ function MinionService.refreshFollowerEnergyValues(player: Player)
 	end
 
 	local powerChange = 0
-	for _, follower in playerFollowers do
-		local value = PlayerShopService.getMinionEnergyValue(player, follower.minionType, follower.baseValue)
-		if value ~= nil and value ~= follower.value then
-			powerChange += value - follower.value
-			follower.value = value
+	for index = #playerFollowers, 1, -1 do
+		local follower = playerFollowers[index]
+		if not PlayerShopService.isMinionUnlocked(player, follower.minionType) then
+			powerChange -= follower.value
+			table.remove(playerFollowers, index)
+			follower.instance:SetAttribute(ATTRIBUTE.FollowerState, FOLLOWER_STATE.Removed)
+			scheduleSourceDestroy(follower.instance, 0.15)
+		else
+			local value = PlayerShopService.getMinionEnergyValue(player, follower.minionType, follower.baseValue)
+			if value ~= nil and value ~= follower.value then
+				powerChange += value - follower.value
+				follower.value = value
+			end
 		end
 	end
+	updateFollowerCount(player)
 	if powerChange > 0 then
 		PlayerEnergyService.addEnergy(player, powerChange)
 	elseif powerChange < 0 then

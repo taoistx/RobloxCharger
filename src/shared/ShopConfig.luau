@@ -25,7 +25,7 @@ ShopConfig.CoinPresentation = {
 	-- Free "Coin For GUI" Creator Store asset:
 	-- https://create.roblox.com/store/asset/124427641438396
 	-- Coins 反馈界面显示的图标资源。
-	IconImage = "rbxassetid://98180974328051",
+	IconImage = "rbxassetid://75544237668184",
 	Feedback = {
 		-- 获得 Coins 时播放的本地音效资源。
 		SoundId = "rbxassetid://9113856580",
@@ -39,8 +39,6 @@ ShopConfig.CoinPresentation = {
 }
 
 ShopConfig.MinionEnergyUpgrades = {
-	-- 小兵能量升级每级增加的战力。
-	EnergyPerLevel = 1,
 	-- 小兵能量升级的默认初始价格（Coins）。
 	BaseCost = 10,
 	-- 小兵能量升级价格随当前等级增长的倍率。
@@ -50,14 +48,21 @@ ShopConfig.MinionEnergyUpgrades = {
 }
 
 ShopConfig.EnergyCapacityUpgrades = {
-	-- 玩家容量升级每级增加的能量上限。
-	CapacityPerLevel = 50,
+	-- 玩家通过 EnergyCapacityUpgrade Part 购买容量升级时，每级增加的能量上限。
+	CapacityPerLevel = 10,
+	-- 玩家持续站在 EnergyCapacityUpgrade Part 上时，自动重复购买的间隔（秒）。
+	AutoPurchaseIntervalSeconds = 0.75,
 	-- 容量升级的初始价格（Coins）。
-	BaseCost = 100,
+	BaseCost = 10,
 	-- 容量升级价格随当前等级增长的倍率。
-	CostMultiplier = 1.4,
+	CostMultiplier = 2,
 	-- 容量升级最高等级。
 	MaxLevel = 100,
+	Feedback = {
+		-- 玩家成功在 EnergyCapacityUpgrade 区域购买升级时播放的本地音效。
+		SoundId = "rbxassetid://131886985",
+		SoundVolume = 0.6,
+	},
 }
 
 ShopConfig.MinionUnlocks = {
@@ -69,7 +74,6 @@ ShopConfig.PurchaseActions = {
 	-- 客户端请求购买时使用的操作名称。
 	UnlockMinion = "UnlockMinion",
 	UpgradeMinionEnergy = "UpgradeMinionEnergy",
-	UpgradeEnergyCapacity = "UpgradeEnergyCapacity",
 }
 
 ShopConfig.Prompt = {
@@ -87,9 +91,7 @@ ShopConfig.Prompt = {
 	HoldDuration = 0,
 }
 
--- Override entries by minion template name. GamePassId values should be filled
--- after Roblox Game Passes are created for production.
--- 下方表项以小兵模板名称为 key；正式创建 Game Pass 后再填写对应的 ID。
+-- 下方表项以小兵模板名称为 key；gamePassId 用于一次性 Robux 永久解锁。
 ShopConfig.Minions = {
 	rabbit = {
 		-- 商店界面显示的小兵名称，不参与模板匹配。
@@ -97,9 +99,23 @@ ShopConfig.Minions = {
 		-- 该小兵的 Coins 解锁价格；默认小兵固定为 0。
 		unlockCoinCost = 0,
 		-- 该小兵能量升级的初始价格（Coins）。
-		upgradeBaseCost = 50,
+		upgradeBaseCost = 10,
 		-- Game Pass ID；大于 0 时显示 Robux 解锁入口。
 		gamePassId = 0,
+	},
+	cat = {
+		displayName = "Cat",
+		unlockCoinCost = 500,
+		upgradeBaseCost = 10,
+		-- 玩家可以使用 Coins 或对应 Game Pass 永久解锁。
+		gamePassId = 1976408911,
+	},
+	dog = {
+		displayName = "Dog",
+		unlockCoinCost = 500,
+		upgradeBaseCost = 10,
+		-- 玩家可以使用 Coins 或对应 Game Pass 永久解锁。
+		gamePassId = 1979360662,
 	},
 } :: { [string]: MinionConfig }
 
@@ -163,9 +179,10 @@ function ShopConfig.getCapacityUpgradeCost(currentLevel: number): number?
 	)
 end
 
-function ShopConfig.getMinionEnergyBonus(upgradeLevel: number): number
+function ShopConfig.getMinionEnergyBonus(upgradeLevel: number, energyUpgradePerLevel: number): number
 	local safeLevel = sanitizeLevel(upgradeLevel, ShopConfig.MinionEnergyUpgrades.MaxLevel)
-	return safeLevel * ShopConfig.MinionEnergyUpgrades.EnergyPerLevel
+	local safeEnergyUpgradePerLevel = math.max(0, math.floor(energyUpgradePerLevel))
+	return safeLevel * safeEnergyUpgradePerLevel
 end
 
 function ShopConfig.getCapacityBonus(upgradeLevel: number): number
