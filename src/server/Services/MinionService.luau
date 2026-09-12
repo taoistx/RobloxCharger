@@ -10,6 +10,8 @@
 	controls that minion type's energy gained per shop upgrade level.
 	Optional attributes: Collected: boolean (runtime, defaults false);
 	SpawnOwnerUserId: number (runtime, only this player may collect the pickup).
+	Required runtime attribute: PickupId: non-empty string, assigned by
+	MinionSpawnService and returned only in server-to-client pickup confirmation.
 
 	On collection, the referenced minion template is cloned into
 	ReplicatedStorage/MinionFollowerStorage as a replicated visual source, and the
@@ -35,6 +37,7 @@ type Binding = {
 	template: Instance,
 	minionType: string,
 	baseValue: number,
+	pickupId: string,
 }
 type Follower = {
 	instance: Instance,
@@ -264,9 +267,9 @@ local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 	end
 	if not PlayerEnergyService.canAddEnergy(player) then
 		instance:SetAttribute(ATTRIBUTE.Collected, true)
+		getPickupFeedbackEvent():FireClient(player, binding.pickupId)
 		CollectionService:RemoveTag(instance, TAG)
 		instance:Destroy()
-		getPickupFeedbackEvent():FireClient(player)
 		player:SetAttribute(ATTRIBUTE.StatusMessage, "能量已满，小兵不会加入！")
 		return
 	end
@@ -283,10 +286,10 @@ local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 		return
 	end
 	appendFollower(player, followerSource, binding.minionType, binding.baseValue, value)
+	getPickupFeedbackEvent():FireClient(player, binding.pickupId)
 	CollectionService:RemoveTag(instance, TAG)
 	instance:Destroy()
 	updateFollowerCount(player)
-	getPickupFeedbackEvent():FireClient(player)
 
 	local gained = PlayerEnergyService.addEnergy(player, value)
 	player:SetAttribute(ATTRIBUTE.StatusMessage, "+" .. math.floor(gained) .. " 能量，小兵已加入！")
@@ -298,9 +301,13 @@ local function bind(instance: Instance)
 	end
 	local root = GameplayUtil.getRoot(instance)
 	local template, minionType, baseValue = getMinionDefinition(instance)
-	if root == nil or template == nil or minionType == nil or baseValue == nil then
+	local pickupId = instance:GetAttribute(ATTRIBUTE.PickupId)
+	if root == nil or template == nil or minionType == nil or baseValue == nil or typeof(pickupId) ~= "string" or pickupId == "" then
 		if root == nil then
 			warn("[MinionService] pickup must be a BasePart or Model containing a BasePart", instance)
+		end
+		if typeof(pickupId) ~= "string" or pickupId == "" then
+			warn("[MinionService] pickup requires a non-empty PickupId string", instance)
 		end
 		return
 	end
@@ -311,6 +318,7 @@ local function bind(instance: Instance)
 		template = template,
 		minionType = minionType,
 		baseValue = baseValue,
+		pickupId = pickupId,
 		connections = {},
 	}
 	bindings[instance] = binding

@@ -20,7 +20,8 @@
 	in the range 1..1,000,000. These are follower visuals, not world pickups.
 
 	Each generated pickup has a MinionType string attribute containing the exact
-	name of the MinionTemplates child to add. SpawnOwnerUserId makes the pickup
+	name of the MinionTemplates child to add, plus a unique PickupId used only for
+	server-to-client visual confirmation. SpawnOwnerUserId makes the pickup
 	collectable only by the player for whom it was generated. Its appearance is
 	cloned from the `pickBall` object in ServerStorage or Workspace. An optional
 	non-empty MinionType on `pickBall` locks random spawns to that template;
@@ -29,6 +30,7 @@
 ]]
 
 local CollectionService = game:GetService("CollectionService")
+local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ServerStorage = game:GetService("ServerStorage")
@@ -223,6 +225,10 @@ local function createPickup(minionTemplate: Instance, index: number): Instance?
 	end
 
 	return pickup
+end
+
+local function assignPickupId(pickup: Instance)
+	pickup:SetAttribute(ATTRIBUTE.PickupId, HttpService:GenerateGUID(false))
 end
 
 local function hasMinionTemplate(minionType: string): boolean
@@ -500,6 +506,7 @@ local function spawnZone(player: Player, zoneIndex: number)
 		pickup.Name = "AuthoredMinionPickup_" .. index
 		pickup:SetAttribute(ATTRIBUTE.MinionType, authoredMinionTemplate.Name)
 		pickup:SetAttribute(ATTRIBUTE.Collected, false)
+		assignPickupId(pickup)
 		pickup:SetAttribute(ATTRIBUTE.SpawnOwnerUserId, player.UserId)
 		pickup.Parent = folder
 		CollectionService:AddTag(pickup, TAG.MinionPicker)
@@ -538,6 +545,7 @@ local function spawnZone(player: Player, zoneIndex: number)
 
 		root:PivotTo(spawnCFrame)
 		pickup:SetAttribute(ATTRIBUTE.Collected, false)
+		assignPickupId(pickup)
 		pickup:SetAttribute(ATTRIBUTE.SpawnOwnerUserId, player.UserId)
 		pickup.Parent = folder
 		CollectionService:AddTag(pickup, TAG.MinionPicker)

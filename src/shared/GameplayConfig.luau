@@ -6,6 +6,8 @@ GameplayConfig.Tags = {
 	GameZone = "GameZone",
 	Minion = "Minion",
 	MinionPicker = "MinionPicker",
+	SwingHammer = "SwingHammer",
+	LinearMover = "LinearMover",
 	MinionModifier = "MinionModifier",
 	RandomMinionModifierGroup = "RandomMinionModifierGroup",
 	Trap = "Trap",
@@ -59,6 +61,17 @@ GameplayConfig.Attributes = {
 	RequiredEnergy = "RequiredEnergy",
 	Defeated = "Defeated",
 	Collected = "Collected",
+	-- 每个运行时 picker 的不可变标识；仅用于客户端确认本地拾取反馈。
+	PickupId = "PickupId",
+	-- 摆锤根 Model 的可选表现/判定参数。
+	SwingAmplitudeDegrees = "SwingAmplitudeDegrees",
+	SwingSpeedRadians = "SwingSpeedRadians",
+	SwingPhaseRadians = "SwingPhaseRadians",
+	-- LinearMover 根 Model 的世界轴往复运动参数。
+	MoveAxis = "MoveAxis",
+	MoveRange = "MoveRange",
+	MoveSpeed = "MoveSpeed",
+	MovePhase = "MovePhase",
 	TreadmillEnabled = "TreadmillEnabled",
 	TreadmillGamePassId = "TreadmillGamePassId",
 	ActiveTreadmillMultiplier = "ActiveTreadmillMultiplier",

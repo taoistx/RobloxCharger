@@ -21,6 +21,8 @@ Charger/
 ├─ src/
 │  ├─ shared/
 │  │  ├─ GameplayConfig.luau
+│  │  ├─ LinearMoverConfig.luau
+│  │  ├─ SwingHammerConfig.luau
 │  │  ├─ MinionModifierConfig.luau
 │  │  ├─ ShopConfig.luau
 │  │  ├─ SubscriptionConfig.luau
@@ -34,8 +36,10 @@ Charger/
 │  │     ├─ FinalZoneService.luau
 │  │     ├─ GameplayUtil.luau
 │  │     ├─ ForcedRunService.luau
+│  │     ├─ LinearMoverService.luau
 │  │     ├─ MinionModifierService.luau
 │  │     ├─ RandomMinionModifierGroupService.luau
+│  │     ├─ SwingHammerService.luau
 │  │     ├─ MinionService.luau
 │  │     ├─ MinionSpawnService.luau
 │  │     ├─ PlayerEnergyService.luau
@@ -52,12 +56,14 @@ Charger/
 │     ├─ EnergyHud.client.luau
 │     ├─ FinalCelebrationPresentation.client.luau
 │     ├─ ForcedRunController.client.luau
+│     ├─ LinearMoverPresentation.client.luau
 │     ├─ MinionPickupPresentation.client.luau
 │     ├─ MinionModifierPresentation.client.luau
 │     ├─ RandomMinionModifierGroupPresentation.client.luau
 │     ├─ MinionPresentation.client.luau
 │     ├─ ProgressionPresentation.client.luau
 │     ├─ ShopController.client.luau
+│     ├─ SwingHammerPresentation.client.luau
 │     └─ TreadmillController.client.luau
 ├─ docs/
 │  ├─ charger-ui-gameplay-concept.png
@@ -78,8 +84,8 @@ Charger/
 
 - `src/shared` 保存客户端与服务端共用的标签、属性、玩法参数、商店参数和配置校验。
 - `src/server/GameplayBootstrap.server.luau` 是服务端入口，统一启动 `src/server/Services` 下的权威玩法服务。
-- `src/server/Services` 保存玩家成长、订阅权益、商店与游戏币、能量上限升级区域、强制前进、跑步机、终点结算、士兵生成与队列、数量修改器、陷阱、即死区域、Boss、演示场景及通用实例工具。
-- `src/client` 保存 HUD、商店与金币反馈界面、跑步机购买提示、终点庆祝、Boss 玩家隔离与反馈、成长反馈、士兵跟随及数量修改器等客户端表现。
+- `src/server/Services` 保存玩家成长、订阅权益、商店与游戏币、能量上限升级区域、强制前进、跑步机、终点结算、士兵生成与队列、数量修改器、静态陷阱、直线移动陷阱、摆锤权威击飞、即死区域、Boss、演示场景及通用实例工具。
+- `src/client` 保存 HUD、商店与金币反馈界面、跑步机购买提示、终点庆祝、Boss 玩家隔离与反馈、成长反馈、士兵跟随、picker 本地即时反馈、直线机关与摆锤平滑表现及数量修改器等客户端表现。
 - `docs` 保存玩法概念、演示构建脚本和视觉参考；`配置说明.md` 保存玩法对象的配置与使用说明。
 - `assets`、`Scene.rbxmx` 和 `SoliderMinion.rbxm` 是场景与美术源资源，不在当前 Rojo 源码映射中。
 - `Assets/DecorateLevels5To9.luau` 仅在 Studio 编辑态执行，生成 `Workspace/PetCastleDecor/07_Levels5To9` 和 `Workspace/PetCastleDecor/TracksideDecor/07_Levels5To9`；赛道两旁装饰统一放入 `TracksideDecor`，不得将此脚本作为运行时 Script 安装。
@@ -110,6 +116,15 @@ Charger/
 - `MinionSpawnCount = -1` 会同时禁用预置与随机 picker；仅使用三个手摆 picker 时应设为 `3`，而不是 `-1`。
 - 随机 picker 选点时必须把预置位置计入 `MinionSpawnMinSpacing` 检查，避免随机对象与固定对象重叠。
 - 玩家死亡、角色移除或离开服务器时必须清理该玩家的运行时 picker；重生后再次进入相应区域时，预置和随机 picker 都按新的一条命重新创建。
+
+### 运动机关与 Trap
+
+- `Trap` Tag 只表示伤害身份；静态 Trap 使用服务端 `Touched`，运动机关下的 Trap 由对应运动服务按虚拟轨迹判定。
+- 直线往复机关的根 Model 使用 `LinearMover` Tag，并配置 `MoveAxis`、`MoveRange`、`MoveSpeed`，可选 `MovePhase`；实际伤害子级 BasePart 单独使用 `Trap` Tag 和 `EnergyDamage`。
+- 摆锤根 Model 使用 `SwingHammer` Tag；`Post` 是移动锤头并带 `Trap` Tag，`HammerHead.SwingPivot` 是固定旋转轴。
+- 运动视觉由客户端基于 `Workspace:GetServerTimeNow()` 每帧渲染；服务端不得逐帧复制 Anchored Part 的 CFrame，而应计算同一条轨迹进行权威扫掠命中。
+- 运动视觉 Part 保持 `Anchored = true`，并关闭 `CanCollide`、`CanTouch`、`CanQuery`，避免服务端原始位置产生幽灵碰撞。
+- 不要在场景对象中安装独立运动 Script；统一运动组件必须放在 Rojo 管理的 `src/server`、`src/client` 和 `src/shared` 中。
 
 - `*.server.luau` 是服务端 Script；只放服务端逻辑。
 - `*.client.luau` 是客户端 LocalScript；只放输入、界面、镜头、音效和本地特效等表现逻辑。
