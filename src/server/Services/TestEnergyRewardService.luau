@@ -75,7 +75,7 @@ local function createDefaultPart()
 	label.Size = UDim2.fromScale(1, 1)
 	label.BackgroundTransparency = 1
 	label.Font = Enum.Font.GothamBlack
-	label.Text = "测试：+5000 能量 / 上限"
+	label.Text = "TEST: +5000 ENERGY / CAPACITY"
 	label.TextColor3 = Color3.fromRGB(255, 245, 157)
 	label.TextScaled = true
 	label.TextStrokeTransparency = 0.45
@@ -116,7 +116,7 @@ local function awardPlayer(part: BasePart, touchedPart: BasePart)
 	-- This is deliberately independent of MinionService: no follower is added or removed.
 	player:SetAttribute(ATTRIBUTE.EnergyCapacity, REWARD_AMOUNT)
 	PlayerEnergyService.setEnergy(player, REWARD_AMOUNT)
-	player:SetAttribute(ATTRIBUTE.StatusMessage, "测试奖励：能量和上限已设为 5000（不增加跟随小兵）")
+	player:SetAttribute(ATTRIBUTE.StatusMessage, "Test reward: Energy and capacity set to 5000 (no minions added).")
 end
 
 local function bind(instance: Instance)

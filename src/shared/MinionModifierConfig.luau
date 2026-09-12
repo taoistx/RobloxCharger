@@ -8,7 +8,7 @@
 -- MinionModifier Tag 必须放在 Workspace 中已锚定且 CanTouch = true 的 BasePart 上。
 -- Operation 必须为 Add、Subtract 或 Multiply；Operand 必须为整数。
 -- Add/Subtract 的 Operand 范围为 1..1,000，Multiply 的 Operand 范围为 0..10。
--- Add 和 Multiply 新增的士兵全部复制玩家当前序号最后的跟随士兵。
+-- Add 新增的士兵复制玩家当前序号最后的跟随士兵；Multiply 按当前完整队伍组成追加副本。
 -- Enabled 可选，类型为 boolean，默认开启；每名玩家每条命每个门只能使用一次。
 
 local GameplayConfig = require(script.Parent:WaitForChild("GameplayConfig"))
@@ -52,11 +52,14 @@ MinionModifierConfig.RandomGroup = {
 		{ operation = MinionModifierConfig.Operations.Add, operand = 3 },
 		{ operation = MinionModifierConfig.Operations.Add, operand = 5 },
 		{ operation = MinionModifierConfig.Operations.Multiply, operand = 2 },
+        { operation = MinionModifierConfig.Operations.Multiply, operand = 3 },
 	},
 	NegativeEffects = {
 		-- 随机门可能抽到的负面效果池；至少会抽取一个负面效果。
 		{ operation = MinionModifierConfig.Operations.Subtract, operand = 3 },
 		{ operation = MinionModifierConfig.Operations.Subtract, operand = 5 },
+        { operation = MinionModifierConfig.Operations.Subtract, operand = 8 },
+        --{ operation = MinionModifierConfig.Operations.Multiply, operand = 2 },
 	},
 	-- 除保证的一正一负以外，其余随机门抽到正面效果的概率。
 	PositiveChanceForExtraSlots = 0.5,

@@ -262,7 +262,7 @@ local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 		return
 	end
 	if not PlayerShopService.isMinionUnlocked(player, binding.minionType) then
-		player:SetAttribute(ATTRIBUTE.StatusMessage, "该小兵尚未解锁！")
+		player:SetAttribute(ATTRIBUTE.StatusMessage, "This minion is still locked!")
 		return
 	end
 	if not PlayerEnergyService.canAddEnergy(player) then
@@ -270,7 +270,7 @@ local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 		getPickupFeedbackEvent():FireClient(player, binding.pickupId)
 		CollectionService:RemoveTag(instance, TAG)
 		instance:Destroy()
-		player:SetAttribute(ATTRIBUTE.StatusMessage, "能量已满，小兵不会加入！")
+		player:SetAttribute(ATTRIBUTE.StatusMessage, "Energy is full. The minion cannot join!")
 		return
 	end
 	local value = PlayerShopService.getMinionEnergyValue(player, binding.minionType, binding.baseValue)
@@ -292,7 +292,7 @@ local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 	updateFollowerCount(player)
 
 	local gained = PlayerEnergyService.addEnergy(player, value)
-	player:SetAttribute(ATTRIBUTE.StatusMessage, "+" .. math.floor(gained) .. " 能量，小兵已加入！")
+	player:SetAttribute(ATTRIBUTE.StatusMessage, "+" .. math.floor(gained) .. " Energy. Minion joined!")
 end
 
 local function bind(instance: Instance)
@@ -442,6 +442,57 @@ function MinionService.setFollowerCount(player: Player, target: number): (boolea
 		end
 		powerChange = -PlayerEnergyService.removeEnergy(player, removedPower)
 	end
+	updateFollowerCount(player)
+	return true, powerChange
+end
+
+-- Adds followers by repeating a snapshot of the player's current queue. This is
+-- used by multiplier gates so every minion type keeps the same composition; for
+-- example, three rabbits and one dog become six rabbits and two dogs at x2.
+-- Reductions and no-op targets keep the normal queue-removal behavior.
+function MinionService.setFollowerCountFromCurrentComposition(player: Player, target: number): (boolean, number)
+	local playerFollowers = followers[player]
+	if playerFollowers == nil or player.Parent ~= Players or target ~= target
+		or target % 1 ~= 0 or target < 0 or target > GameplayConfig.Limits.MaxFollowersPerPlayer
+	then
+		return false, 0
+	end
+
+	local current = #playerFollowers
+	if target <= current then
+		return MinionService.setFollowerCount(player, target)
+	end
+	if current == 0 then
+		return false, 0
+	end
+
+	local composition: { Follower } = table.clone(playerFollowers)
+	local prepared: { Follower } = table.create(target - current)
+	for additionIndex = 1, target - current do
+		local original = composition[((additionIndex - 1) % current) + 1]
+		local source = cloneFollowerSource(original.instance)
+		if source == nil then
+			for _, follower in prepared do
+				follower.instance:Destroy()
+			end
+			warn("[MinionService] unable to clone follower source", original.instance)
+			return false, 0
+		end
+		table.insert(prepared, {
+			instance = source,
+			minionType = original.minionType,
+			baseValue = original.baseValue,
+			value = original.value,
+			order = 0,
+		})
+	end
+
+	local powerChange = 0
+	for _, follower in prepared do
+		appendFollower(player, follower.instance, follower.minionType, follower.baseValue, follower.value)
+		powerChange += follower.value
+	end
+	powerChange = PlayerEnergyService.addEnergy(player, powerChange)
 	updateFollowerCount(player)
 	return true, powerChange
 end

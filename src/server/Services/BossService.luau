@@ -50,18 +50,20 @@ local BossService = {}
 local TAG = GameplayConfig.Tags.Boss
 local ATTRIBUTE = GameplayConfig.Attributes
 local FEEDBACK_NAME = GameplayConfig.InstanceNames.BossDefeatFeedback
+local DEFEAT_SOUND_NAME = GameplayConfig.InstanceNames.BossDefeatSound
 local TOUCH_VALIDATION_DISTANCE = GameplayConfig.Boss.TouchValidationDistance
 
 local templates: { TemplateRecord } = {}
 local bindings: { [Instance]: Binding } = {}
 local playerStates: { [Player]: PlayerState } = {}
 local feedbackRemote: RemoteEvent? = nil
+local defeatSoundRemote: RemoteEvent? = nil
 local started = false
 
-local function createFeedbackRemote(): RemoteEvent
-	local existing = ReplicatedStorage:FindFirstChild(FEEDBACK_NAME)
+local function createRemote(name: string): RemoteEvent
+	local existing = ReplicatedStorage:FindFirstChild(name)
 	if existing ~= nil and not existing:IsA("RemoteEvent") then
-		warn("[BossService] replacing incorrectly typed BossDefeatFeedback", existing)
+		warn("[BossService] replacing incorrectly typed remote " .. name, existing)
 		existing:Destroy()
 		existing = nil
 	end
@@ -69,7 +71,7 @@ local function createFeedbackRemote(): RemoteEvent
 		return existing :: RemoteEvent
 	end
 	local remote = Instance.new("RemoteEvent")
-	remote.Name = FEEDBACK_NAME
+	remote.Name = name
 	remote.Parent = ReplicatedStorage
 	return remote
 end
@@ -129,11 +131,11 @@ local function defeatBoss(instance: Instance, binding: Binding, player: Player)
 	end
 	player:SetAttribute(
 		ATTRIBUTE.StatusMessage,
-		"Boss 击败！消耗 "
+		"Boss defeated! Spent "
 			.. math.floor(binding.requiredEnergy)
-			.. " 能量，"
+			.. " Energy. "
 			.. releasedCount
-			.. " 个小兵被撞飞。"
+			.. " minions were knocked away."
 	)
 	instance:Destroy()
 end
@@ -180,13 +182,19 @@ local function onBossTouched(instance: Instance, bossPart: BasePart, touchedPart
 	end
 	binding.lastContactTime = now
 
+	local currentEnergy = player:GetAttribute(ATTRIBUTE.CurrentEnergy)
+	local shouldPlayDefeatSound = typeof(currentEnergy) == "number"
+		and currentEnergy >= binding.requiredEnergy
 	if not PlayerEnergyService.spendEnergy(player, binding.requiredEnergy) then
 		player:SetAttribute(
 			ATTRIBUTE.StatusMessage,
-			"能量不足（需要 " .. math.floor(binding.requiredEnergy) .. "），被 Boss 击败！"
+			"Not enough Energy (" .. math.floor(binding.requiredEnergy) .. " required). The Boss defeated you!"
 		)
 		humanoid.Health = 0
 		return
+	end
+	if shouldPlayDefeatSound and defeatSoundRemote ~= nil then
+		defeatSoundRemote:FireClient(player)
 	end
 
 	local impactSequence = player:GetAttribute(ATTRIBUTE.BossImpactSequence)
@@ -197,7 +205,7 @@ local function onBossTouched(instance: Instance, bossPart: BasePart, touchedPart
 	defeatBoss(instance, binding, player)
 	local remainingEnergy = player:GetAttribute(ATTRIBUTE.CurrentEnergy)
 	if typeof(remainingEnergy) == "number" and remainingEnergy <= 0 then
-		player:SetAttribute(ATTRIBUTE.StatusMessage, "能量刚好耗尽：Boss 已粉碎，但你也倒下了！")
+		player:SetAttribute(ATTRIBUTE.StatusMessage, "Energy depleted: you smashed the Boss, but fell too!")
 		humanoid.Health = 0
 	end
 end
@@ -392,7 +400,8 @@ function BossService.start()
 		return
 	end
 	started = true
-	feedbackRemote = createFeedbackRemote()
+	feedbackRemote = createRemote(FEEDBACK_NAME)
+	defeatSoundRemote = createRemote(DEFEAT_SOUND_NAME)
 
 	local authoredTemplates = CollectionService:GetTagged(TAG)
 	for _, instance in authoredTemplates do

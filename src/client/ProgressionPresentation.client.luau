@@ -98,13 +98,13 @@ local function updateHud()
 	local experience = math.max(0, math.floor(getNumberAttribute(ATTRIBUTE.CurrentExperience, 0)))
 	local required = math.max(0, math.floor(getNumberAttribute(ATTRIBUTE.ExperienceToNextLevel, 0)))
 	if level >= GameplayConfig.Limits.MaxPlayerLevel then
-		title.Text = string.format("等级 %d · 已满级", level)
+		title.Text = string.format("LEVEL %d  •  MAX LEVEL", level)
 		progressText.Text = "MAX"
 		barFill.Size = UDim2.fromScale(1, 1)
 		return
 	end
 
-	title.Text = string.format("等级 %d · 跑动获得经验", level)
+	title.Text = string.format("LEVEL %d  •  RUN TO EARN XP", level)
 	progressText.Text = string.format("%d / %d XP", experience, required)
 	local progress = if required > 0 then math.clamp(experience / required, 0, 1) else 0
 	TweenService:Create(barFill, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {

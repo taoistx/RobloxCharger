@@ -109,6 +109,7 @@ GameplayConfig.InstanceNames = {
 	RandomMinionModifierAssignment = "RandomMinionModifierAssignment",
 	RandomMinionModifierUpdate = "RandomMinionModifierUpdate",
 	BossDefeatFeedback = "BossDefeatFeedback",
+	BossDefeatSound = "BossDefeatSound",
 	ShopGetSnapshot = "ShopGetSnapshot",
 	ShopPurchase = "ShopPurchase",
 	ShopUpdated = "ShopUpdated",
@@ -128,6 +129,18 @@ GameplayConfig.Final = {
 		R6AnimationId = "rbxassetid://129423030",
 		R15AnimationId = "rbxassetid://507770677",
 	},
+}
+
+GameplayConfig.BackgroundMusic = {
+	-- 全局背景音乐在每位玩家的客户端循环播放。
+	SoundId = "rbxassetid://139242395374944",
+	-- 背景音乐默认保持在不压过拾取与终点反馈音效的音量。
+	SoundVolume = 0.3,
+	-- 玩家进入 GameZone 后切换到的背景音乐。
+	GameZoneSoundId = "rbxassetid://130366303895413",
+	GameZoneSoundVolume = 0.3,
+	-- 两首背景音乐交叉淡入淡出的时长（秒）。
+	TransitionSeconds = 0.5,
 }
 
 GameplayConfig.Defaults = {
@@ -169,6 +182,11 @@ GameplayConfig.MinionPickup = {
 GameplayConfig.Boss = {
 	-- 服务端判定角色接触 Boss 时允许的额外距离容差（stud）。
 	TouchValidationDistance = 12,
+	DefeatSound = {
+		-- 玩家碰撞 Boss 且能量足以击败它时播放的本地音效。
+		SoundId = "rbxassetid://140558324601866",
+		SoundVolume = 0.75,
+	},
 	-- 客户端刷新最近 Boss 目标提示的间隔（秒）。
 	ObjectiveRefreshSeconds = 0.1,
 	Objective = {

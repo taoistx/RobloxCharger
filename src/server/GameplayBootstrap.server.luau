@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 
+local TutorialService = require(script.Parent.Services:WaitForChild("TutorialService"))
 local PlayerShopService = require(script.Parent.Services:WaitForChild("PlayerShopService"))
 local PlayerEnergyService = require(script.Parent.Services:WaitForChild("PlayerEnergyService"))
 local EnergyCapacityUpgradeService = require(script.Parent.Services:WaitForChild("EnergyCapacityUpgradeService"))
@@ -26,6 +27,7 @@ local TestEnergyRewardService = require(script.Parent.Services:WaitForChild("Tes
 
 Players.RespawnTime = GameplayConfig.Defaults.PlayerRespawnSeconds
 
+TutorialService.start()
 PlayerShopService.start()
 PlayerProgressionService.start()
 PlayerEnergyService.start()

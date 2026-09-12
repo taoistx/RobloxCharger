@@ -6,9 +6,11 @@
 -- The server remains authoritative for energy spending and collision outcomes.
 
 local CollectionService = game:GetService("CollectionService")
+local ContentProvider = game:GetService("ContentProvider")
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
@@ -43,6 +45,7 @@ local ATTRIBUTE = GameplayConfig.Attributes
 local BOSS_CONFIG = GameplayConfig.Boss
 local OBJECTIVE_CONFIG = BOSS_CONFIG.Objective
 local FRAGMENT_CONFIG = BOSS_CONFIG.Fragments
+local DEFEAT_SOUND_CONFIG = BOSS_CONFIG.DefeatSound
 local OBJECTIVE_REFRESH_SECONDS = math.max(0.02, BOSS_CONFIG.ObjectiveRefreshSeconds)
 -- boss需求显示的图标
 local BOSS_ENERGY_ICON = "rbxassetid://109506052270768"
@@ -58,6 +61,23 @@ local stopped = false
 local feedbackRemote = ReplicatedStorage:WaitForChild(
 	GameplayConfig.InstanceNames.BossDefeatFeedback
 ) :: RemoteEvent
+local defeatSoundRemote = ReplicatedStorage:WaitForChild(
+	GameplayConfig.InstanceNames.BossDefeatSound
+) :: RemoteEvent
+
+local defeatSound = Instance.new("Sound")
+defeatSound.Name = "BossDefeatSound"
+defeatSound.SoundId = DEFEAT_SOUND_CONFIG.SoundId
+defeatSound.Volume = DEFEAT_SOUND_CONFIG.SoundVolume
+defeatSound.Parent = SoundService
+task.spawn(function()
+	local success, errorMessage = pcall(function()
+		ContentProvider:PreloadAsync({ defeatSound })
+	end)
+	if not success then
+		warn("[BossPresentation] unable to preload Boss defeat sound", errorMessage)
+	end
+end)
 
 local function disconnectAll(list: { RBXScriptConnection })
 	for _, connection in list do
@@ -516,6 +536,12 @@ end
 
 local fragmentRandom = Random.new()
 
+local function playDefeatSound()
+	defeatSound:Stop()
+	defeatSound.TimePosition = 0
+	defeatSound:Play()
+end
+
 local function spawnFragments(origin: CFrame, boundsSize: Vector3)
 	local halfSpread = Vector3.new(
 		math.min(math.abs(boundsSize.X) / 2, FRAGMENT_CONFIG.SpreadCap),
@@ -571,6 +597,8 @@ table.insert(connections, feedbackRemote.OnClientEvent:Connect(function(originVa
 	spawnFragments(originValue, boundsSizeValue)
 end))
 
+table.insert(connections, defeatSoundRemote.OnClientEvent:Connect(playDefeatSound))
+
 table.insert(connections, CollectionService:GetInstanceAddedSignal(TAG):Connect(bind))
 table.insert(connections, CollectionService:GetInstanceRemovedSignal(TAG):Connect(unbind))
 -- A tagged instance can leave Workspace without leaving the DataModel. Its
@@ -586,6 +614,7 @@ end
 
 script.Destroying:Connect(function()
 	stopped = true
+	defeatSound:Destroy()
 	disconnectAll(connections)
 	disconnectAll(characterConnections)
 	stopRefresh()

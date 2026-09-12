@@ -25,6 +25,7 @@ Charger/
 │  │  ├─ SwingHammerConfig.luau
 │  │  ├─ MinionModifierConfig.luau
 │  │  ├─ ShopConfig.luau
+│  │  ├─ TutorialConfig.luau
 │  │  ├─ SubscriptionConfig.luau
 │  │  └─ TreadmillConfig.luau
 │  ├─ server/
@@ -48,6 +49,7 @@ Charger/
 │  │     ├─ PlayerSubscriptionService.luau
 │  │     ├─ KillZoneService.luau
 │  │     ├─ TrapService.luau
+│  │     ├─ TutorialService.luau
 │  │     └─ TreadmillService.luau
 │  └─ client/
 │     ├─ BossPresentation.client.luau
@@ -64,6 +66,7 @@ Charger/
 │     ├─ ProgressionPresentation.client.luau
 │     ├─ ShopController.client.luau
 │     ├─ SwingHammerPresentation.client.luau
+│     ├─ TutorialPresentation.client.luau
 │     └─ TreadmillController.client.luau
 ├─ docs/
 │  ├─ charger-ui-gameplay-concept.png
@@ -82,10 +85,10 @@ Charger/
 └─ SoliderMinion.rbxm
 ```
 
-- `src/shared` 保存客户端与服务端共用的标签、属性、玩法参数、商店参数和配置校验。
+- `src/shared` 保存客户端与服务端共用的标签、属性、玩法参数、商店参数、新手引导参数和配置校验。
 - `src/server/GameplayBootstrap.server.luau` 是服务端入口，统一启动 `src/server/Services` 下的权威玩法服务。
-- `src/server/Services` 保存玩家成长、订阅权益、商店与游戏币、能量上限升级区域、强制前进、跑步机、终点结算、士兵生成与队列、数量修改器、静态陷阱、直线移动陷阱、摆锤权威击飞、即死区域、Boss、演示场景及通用实例工具。
-- `src/client` 保存 HUD、商店与金币反馈界面、跑步机购买提示、终点庆祝、Boss 玩家隔离与反馈、成长反馈、士兵跟随、picker 本地即时反馈、直线机关与摆锤平滑表现及数量修改器等客户端表现。
+- `src/server/Services` 保存玩家成长、订阅权益、商店与游戏币、新手引导存档、能量上限升级区域、强制前进、跑步机、终点结算、士兵生成与队列、数量修改器、静态陷阱、直线移动陷阱、摆锤权威击飞、即死区域、Boss、演示场景及通用实例工具。
+- `src/client` 保存 HUD、商店与金币反馈界面、新手地面引导、跑步机购买提示、终点庆祝、Boss 玩家隔离与反馈、成长反馈、士兵跟随、picker 本地即时反馈、直线机关与摆锤平滑表现及数量修改器等客户端表现。
 - `docs` 保存玩法概念、演示构建脚本和视觉参考；`配置说明.md` 保存玩法对象的配置与使用说明。
 - `assets`、`Scene.rbxmx` 和 `SoliderMinion.rbxm` 是场景与美术源资源，不在当前 Rojo 源码映射中。
 - `Assets/DecorateLevels5To9.luau` 仅在 Studio 编辑态执行，生成 `Workspace/PetCastleDecor/07_Levels5To9` 和 `Workspace/PetCastleDecor/TracksideDecor/07_Levels5To9`；赛道两旁装饰统一放入 `TracksideDecor`，不得将此脚本作为运行时 Script 安装。

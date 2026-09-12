@@ -3,8 +3,9 @@
 --[[
 	Binds tagged treadmill Models. A model named "x15 Treadmill" grants the
 	base reward at x15 while a living player stands on its Conveyor part.
-	x3, x15, and x50 require their configured one-time Game Pass. Occupancy,
-	ownership, and coin grants are all validated by the server.
+	x3, x15, and x50 require their configured one-time Game Pass. Stepping onto
+	a locked treadmill automatically opens its native purchase prompt once per
+	visit. Occupancy, ownership, and coin grants are all validated by the server.
 
 	Tag: Treadmill
 	Accepted Instance: Model containing a BasePart named Conveyor
@@ -30,7 +31,6 @@ type TreadmillBinding = {
 	conveyor: BasePart,
 	multiplier: number,
 	gamePassId: number?,
-	prompt: ProximityPrompt?,
 	connections: { RBXScriptConnection },
 }
 
@@ -41,6 +41,7 @@ local INSTANCE_NAME = GameplayConfig.InstanceNames
 local TAG = GameplayConfig.Tags.Treadmill
 local bindings: { [Instance]: TreadmillBinding } = {}
 local ownedPasses: { [Player]: { [number]: boolean } } = {}
+local lockedTreadmillByPlayer: { [Player]: TreadmillBinding } = {}
 local lastPromptAt: { [Player]: number } = {}
 local started = false
 local promptRemote: RemoteEvent? = nil
@@ -82,6 +83,14 @@ end
 local function playerOwnsPass(player: Player, gamePassId: number): boolean
 	local playerPasses = ownedPasses[player]
 	return playerPasses ~= nil and playerPasses[gamePassId] == true
+end
+
+local function getPassOwnership(player: Player, gamePassId: number): boolean?
+	local playerPasses = ownedPasses[player]
+	if playerPasses == nil then
+		return nil
+	end
+	return playerPasses[gamePassId]
 end
 
 local function refreshPassOwnership(player: Player, gamePassId: number)
@@ -132,44 +141,34 @@ end
 
 local function unbindPlayer(player: Player)
 	ownedPasses[player] = nil
+	lockedTreadmillByPlayer[player] = nil
 	lastPromptAt[player] = nil
 	player:SetAttribute(ATTRIBUTE.ActiveTreadmillMultiplier, nil)
 end
 
-local function isPlayerNearPart(player: Player, part: BasePart, maximumDistance: number): boolean
-	local character = player.Character
-	local rootPart = if character ~= nil then character:FindFirstChild("HumanoidRootPart") else nil
-	return rootPart ~= nil
-		and rootPart:IsA("BasePart")
-		and (rootPart.Position - part.Position).Magnitude <= maximumDistance
-end
-
-local function requestPurchase(player: Player, binding: TreadmillBinding)
+local function requestPurchase(player: Player, binding: TreadmillBinding): boolean
 	local gamePassId = binding.gamePassId
-	if gamePassId == nil or player.Parent ~= Players then
-		return
-	end
-	if not isPlayerNearPart(
-		player,
-		binding.conveyor,
-		TreadmillConfig.Prompt.MaxActivationDistance + TreadmillConfig.Prompt.ServerDistanceTolerance
-	) then
-		return
+	if gamePassId == nil
+		or player.Parent ~= Players
+		or not binding.conveyor:IsDescendantOf(Workspace)
+	then
+		return false
 	end
 	if playerOwnsPass(player, gamePassId) then
-		player:SetAttribute(ATTRIBUTE.StatusMessage, "这台跑步机已经解锁。")
-		return
+		return true
 	end
 
 	local now = os.clock()
-	if now - (lastPromptAt[player] or -math.huge) < TreadmillConfig.Prompt.CooldownSeconds then
-		return
+	if now - (lastPromptAt[player] or -math.huge) < TreadmillConfig.AutoPurchasePrompt.CooldownSeconds then
+		return false
 	end
 	lastPromptAt[player] = now
 	local remote = promptRemote
 	if remote ~= nil then
 		remote:FireClient(player, gamePassId)
+		return true
 	end
+	return false
 end
 
 local function unbind(instance: Instance)
@@ -181,21 +180,11 @@ local function unbind(instance: Instance)
 	for _, connection in binding.connections do
 		connection:Disconnect()
 	end
-	if binding.prompt ~= nil and binding.prompt.Parent ~= nil then
-		binding.prompt:Destroy()
+	for player, lockedBinding in lockedTreadmillByPlayer do
+		if lockedBinding == binding then
+			lockedTreadmillByPlayer[player] = nil
+		end
 	end
-end
-
-local function configurePrompt(prompt: ProximityPrompt, multiplier: number)
-	-- The native purchase prompt shows the player's current managed/regional price.
-	-- Avoid hard-coding a Robux amount into this shared world prompt.
-	prompt.ActionText = "永久解锁 x" .. multiplier
-	prompt.ObjectText = TreadmillConfig.Prompt.ObjectText
-	prompt.KeyboardKeyCode = TreadmillConfig.Prompt.KeyboardKeyCode
-	prompt.MaxActivationDistance = TreadmillConfig.Prompt.MaxActivationDistance
-	prompt.HoldDuration = TreadmillConfig.Prompt.HoldDuration
-	prompt.RequiresLineOfSight = false
-	prompt.Enabled = true
 end
 
 local function bind(instance: Instance)
@@ -228,42 +217,21 @@ local function bind(instance: Instance)
 		warn("[TreadmillService] paid treadmill has no valid Game Pass ID", instance)
 	end
 
-	local prompt: ProximityPrompt? = nil
 	local connections: { RBXScriptConnection } = {}
-	if isPaid(multiplier) and gamePassId ~= nil then
-		local existing = conveyor:FindFirstChild(TreadmillConfig.Prompt.Name)
-		if existing ~= nil and not existing:IsA("ProximityPrompt") then
-			existing:Destroy()
-			existing = nil
-		end
-		prompt = if existing ~= nil then existing :: ProximityPrompt else Instance.new("ProximityPrompt")
-		prompt.Name = TreadmillConfig.Prompt.Name
-		configurePrompt(prompt, multiplier)
-		prompt.Enabled = isEnabled(instance)
-		prompt.Parent = conveyor
+	local oldPrompt = conveyor:FindFirstChild(TreadmillConfig.AutoPurchasePrompt.LegacyInstanceName)
+	if oldPrompt ~= nil and oldPrompt:IsA("ProximityPrompt") then
+		oldPrompt:Destroy()
 	end
 
 	local binding: TreadmillBinding = {
 		conveyor = conveyor,
 		multiplier = multiplier,
 		gamePassId = gamePassId,
-		prompt = prompt,
 		connections = connections,
 	}
 	bindings[instance] = binding
-	if prompt ~= nil then
-		table.insert(connections, prompt.Triggered:Connect(function(player: Player)
-			requestPurchase(player, binding)
-		end))
-	end
 	table.insert(connections, instance.Destroying:Connect(function()
 		unbind(instance)
-	end))
-	table.insert(connections, instance:GetAttributeChangedSignal(ATTRIBUTE.TreadmillEnabled):Connect(function()
-		local currentPrompt = binding.prompt
-		if currentPrompt ~= nil then
-			currentPrompt.Enabled = isEnabled(instance)
-		end
 	end))
 	table.insert(connections, instance:GetAttributeChangedSignal(ATTRIBUTE.TreadmillGamePassId):Connect(function()
 		unbind(instance)
@@ -309,9 +277,10 @@ local function getPlayersOnConveyor(conveyor: BasePart): { [Player]: boolean }
 	return playersOnConveyor
 end
 
-local function awardTick()
+local function updateOccupancy(shouldAwardCoins: boolean)
 	local highestMultiplierByPlayer: { [Player]: number } = {}
 	local highestTouchedMultiplierByPlayer: { [Player]: number } = {}
+	local highestLockedBindingByPlayer: { [Player]: TreadmillBinding } = {}
 	for instance, binding in bindings do
 		if not isEnabled(instance) or not binding.conveyor:IsDescendantOf(Workspace) then
 			continue
@@ -321,13 +290,19 @@ local function awardTick()
 				highestTouchedMultiplierByPlayer[player] or 0,
 				binding.multiplier
 			)
+			local gamePassId = binding.gamePassId
 			local canUse = not isPaid(binding.multiplier)
-				or (binding.gamePassId ~= nil and playerOwnsPass(player, binding.gamePassId))
+				or (gamePassId ~= nil and playerOwnsPass(player, gamePassId))
 			if canUse then
 				highestMultiplierByPlayer[player] = math.max(
 					highestMultiplierByPlayer[player] or 0,
 					binding.multiplier
 				)
+			elseif gamePassId ~= nil and getPassOwnership(player, gamePassId) == false then
+				local currentLockedBinding = highestLockedBindingByPlayer[player]
+				if currentLockedBinding == nil or binding.multiplier > currentLockedBinding.multiplier then
+					highestLockedBindingByPlayer[player] = binding
+				end
 			end
 		end
 	end
@@ -337,8 +312,18 @@ local function awardTick()
 		if player:GetAttribute(ATTRIBUTE.ActiveTreadmillMultiplier) ~= activeMultiplier then
 			player:SetAttribute(ATTRIBUTE.ActiveTreadmillMultiplier, activeMultiplier)
 		end
+
+		local lockedBinding = highestLockedBindingByPlayer[player]
+		if lockedBinding ~= lockedTreadmillByPlayer[player] then
+			if lockedBinding == nil or requestPurchase(player, lockedBinding) then
+				lockedTreadmillByPlayer[player] = lockedBinding
+			end
+		end
 	end
 
+	if not shouldAwardCoins then
+		return
+	end
 	local baseCoins = math.max(0, math.floor(TreadmillConfig.Rewards.CoinsPerAward))
 	for player, multiplier in highestMultiplierByPlayer do
 		PlayerShopService.addCoins(player, baseCoins * multiplier)
@@ -381,14 +366,21 @@ function TreadmillService.start()
 		local playerPasses = ownedPasses[player]
 		if playerPasses ~= nil then
 			playerPasses[gamePassId] = true
-			player:SetAttribute(ATTRIBUTE.StatusMessage, "高倍率跑步机已解锁！")
+			player:SetAttribute(ATTRIBUTE.StatusMessage, "High-multiplier treadmill unlocked!")
 		end
 	end)
 	task.spawn(function()
-		local interval = math.max(0.1, TreadmillConfig.Rewards.AwardIntervalSeconds)
+		local checkInterval = math.max(0.05, TreadmillConfig.Rewards.OccupancyCheckIntervalSeconds)
+		local awardInterval = math.max(0.1, TreadmillConfig.Rewards.AwardIntervalSeconds)
+		local nextAwardAt = os.clock() + awardInterval
 		while started do
-			task.wait(interval)
-			awardTick()
+			task.wait(checkInterval)
+			local now = os.clock()
+			local shouldAwardCoins = now >= nextAwardAt
+			if shouldAwardCoins then
+				nextAwardAt = now + awardInterval
+			end
+			updateOccupancy(shouldAwardCoins)
 		end
 	end)
 

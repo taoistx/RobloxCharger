@@ -58,7 +58,7 @@ local function bind(instance: Instance)
 			and instance.Anchored and instance.CanTouch and instance:IsDescendantOf(Workspace)
 		gui.StudsOffsetWorldSpace = Vector3.new(0, instance.Size.Y / 2 + 1.5, 0)
 		if definition ~= nil then
-			label.Text = "士兵 " .. ModifierConfig.getLabel(definition)
+			label.Text = "MINIONS " .. ModifierConfig.getLabel(definition)
 			local reduces = definition.operation == OPERATION.Subtract
 				or (definition.operation == OPERATION.Multiply and definition.operand == 0)
 			label.TextColor3 = if reduces then Color3.fromRGB(255, 95, 100) else Color3.fromRGB(85, 235, 145)

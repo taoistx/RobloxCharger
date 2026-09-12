@@ -555,7 +555,7 @@ local function spawnZone(player: Player, zoneIndex: number)
 
 	if spawnedCount > 0 then
 		state.spawnedZoneIndices[zoneIndex] = true
-		player:SetAttribute(ATTRIBUTE.StatusMessage, "第 " .. zoneIndex .. " 区的小兵拾取物已就绪！")
+		player:SetAttribute(ATTRIBUTE.StatusMessage, "Minion pickups for Zone " .. zoneIndex .. " are ready!")
 	else
 		folder:Destroy()
 		state.folders[zoneIndex] = nil

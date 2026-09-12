@@ -35,26 +35,16 @@ gui.Parent = playerGui
 local panel = Instance.new("Frame")
 panel.Name = "CoinPanel"
 panel.AnchorPoint = Vector2.new(0, 1)
-panel.Size = UDim2.fromOffset(164, 52)
-panel.Position = UDim2.new(0, 22, 1, -22)
-panel.BackgroundColor3 = Color3.fromRGB(28, 22, 11)
-panel.BackgroundTransparency = 0.08
+panel.Size = UDim2.fromOffset(230, 72)
+panel.Position = UDim2.new(0, 24, 1, -24)
+panel.BackgroundTransparency = 1
 panel.Parent = gui
-
-local panelCorner = Instance.new("UICorner")
-panelCorner.CornerRadius = UDim.new(0, 14)
-panelCorner.Parent = panel
-
-local panelStroke = Instance.new("UIStroke")
-panelStroke.Thickness = 2
-panelStroke.Color = Color3.fromRGB(255, 204, 64)
-panelStroke.Transparency = 0.16
-panelStroke.Parent = panel
 
 local icon = Instance.new("ImageLabel")
 icon.Name = "CoinIcon"
-icon.Size = UDim2.fromOffset(42, 42)
-icon.Position = UDim2.fromOffset(6, 5)
+icon.AnchorPoint = Vector2.new(0, 0.5)
+icon.Size = UDim2.fromOffset(60, 60)
+icon.Position = UDim2.new(0, 0, 0.5, 0)
 icon.BackgroundTransparency = 1
 icon.Image = PRESENTATION.IconImage
 icon.ScaleType = Enum.ScaleType.Fit
@@ -62,20 +52,20 @@ icon.Parent = panel
 
 local coinsText = Instance.new("TextLabel")
 coinsText.Name = "Coins"
-coinsText.Size = UDim2.new(1, -58, 1, 0)
-coinsText.Position = UDim2.fromOffset(52, 0)
+coinsText.Size = UDim2.new(1, -72, 1, 0)
+coinsText.Position = UDim2.fromOffset(68, 0)
 coinsText.BackgroundTransparency = 1
 coinsText.TextXAlignment = Enum.TextXAlignment.Left
-coinsText.TextColor3 = Color3.fromRGB(255, 225, 119)
-coinsText.TextStrokeColor3 = Color3.fromRGB(71, 45, 5)
-coinsText.TextStrokeTransparency = 0.35
+coinsText.TextColor3 = Color3.fromRGB(255, 211, 46)
+coinsText.TextStrokeColor3 = Color3.fromRGB(112, 60, 0)
+coinsText.TextStrokeTransparency = 0.12
 coinsText.Font = Enum.Font.GothamBlack
 coinsText.TextScaled = true
 coinsText.Parent = panel
 
 local textSizeConstraint = Instance.new("UITextSizeConstraint")
-textSizeConstraint.MinTextSize = 12
-textSizeConstraint.MaxTextSize = 25
+textSizeConstraint.MinTextSize = 18
+textSizeConstraint.MaxTextSize = 38
 textSizeConstraint.Parent = coinsText
 
 local function updateCoins()

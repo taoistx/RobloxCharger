@@ -80,15 +80,17 @@ local function onTouched(binding: Binding, touchedPart: BasePart)
 	binding.lastAttempt[player] = now
 	local before = MinionService.getFollowerCount(player)
 	local target = ModifierConfig.getTargetCount(before, definition)
-	local success, powerChange = MinionService.setFollowerCount(player, target)
+	local success, powerChange = if definition.operation == ModifierConfig.Operations.Multiply
+		then MinionService.setFollowerCountFromCurrentComposition(player, target)
+		else MinionService.setFollowerCount(player, target)
 	if not success then
 		return
 	end
 	binding.used[player] = true
 	local powerText = if powerChange >= 0 then "+" .. math.floor(powerChange) else tostring(math.ceil(powerChange))
 	player:SetAttribute(ATTRIBUTE.StatusMessage,
-		"士兵 " .. ModifierConfig.getLabel(definition) .. "：" .. before .. " → " .. target
-			.. "，战力 " .. powerText)
+		"Minions " .. ModifierConfig.getLabel(definition) .. ": " .. before .. " → " .. target
+			.. ", Power " .. powerText)
 end
 
 local function refresh(binding: Binding)

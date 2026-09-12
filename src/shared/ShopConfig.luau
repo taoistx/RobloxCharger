@@ -49,13 +49,13 @@ ShopConfig.MinionEnergyUpgrades = {
 
 ShopConfig.EnergyCapacityUpgrades = {
 	-- 玩家通过 EnergyCapacityUpgrade Part 购买容量升级时，每级增加的能量上限。
-	CapacityPerLevel = 10,
+	CapacityPerLevel = 20,
 	-- 玩家持续站在 EnergyCapacityUpgrade Part 上时，自动重复购买的间隔（秒）。
 	AutoPurchaseIntervalSeconds = 0.75,
 	-- 容量升级的初始价格（Coins）。
 	BaseCost = 10,
 	-- 容量升级价格随当前等级增长的倍率。
-	CostMultiplier = 2,
+	CostMultiplier = 1.7,
 	-- 容量升级最高等级。
 	MaxLevel = 100,
 	Feedback = {

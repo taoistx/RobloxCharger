@@ -132,10 +132,10 @@ function TrapService.tryTrigger(instance: Instance, player: Player, impact: Impa
 		local releasedCount = MinionService.releaseEnergyFollowers(player, removed)
 		player:SetAttribute(
 			ATTRIBUTE.StatusMessage,
-			"触发陷阱，损失 " .. math.floor(removed) .. " 能量，" .. releasedCount .. " 个小兵被撞飞！"
+			"Trap hit! Lost " .. math.floor(removed) .. " Energy; " .. releasedCount .. " minions were knocked away!"
 		)
 	else
-		player:SetAttribute(ATTRIBUTE.StatusMessage, "触发陷阱，但当前没有能量。")
+		player:SetAttribute(ATTRIBUTE.StatusMessage, "Trap hit, but you have no Energy to lose.")
 	end
 	return true
 end

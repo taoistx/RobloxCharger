@@ -275,7 +275,7 @@ function PlayerProgressionService.addRunningDistance(player: Player, distance: n
 	markDirty(state)
 	syncAttributes(player, state)
 	if levelsGained > 0 then
-		player:SetAttribute(ATTRIBUTE.StatusMessage, string.format("升级至 %d 级！蓄能上限已提高。", state.level))
+		player:SetAttribute(ATTRIBUTE.StatusMessage, string.format("Level %d reached! Energy capacity increased.", state.level))
 	end
 	getFeedbackEvent():FireClient(player, gainedExperience, levelsGained)
 end

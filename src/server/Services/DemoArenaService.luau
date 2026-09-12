@@ -63,7 +63,7 @@ function DemoArenaService.buildIfNeeded()
 	zone:SetAttribute(ATTRIBUTE.ZoneIndex, 0)
 	zone:SetAttribute(ATTRIBUTE.MinionSpawnCount, GameplayConfig.Defaults.MinionSpawnCount)
 	CollectionService:AddTag(zone, TAG.GameZone)
-	addWorldLabel(zone, "冲刺充能区：持续跑动来累积能量", Color3.fromRGB(190, 240, 255))
+	addWorldLabel(zone, "SPRINT ZONE: Keep running to gain Energy", Color3.fromRGB(190, 240, 255))
 
 	local boss = createPart(arena, "DemoBoss", Vector3.new(12, 12, 12), CFrame.new(0, 6.5, 74), Color3.fromRGB(218, 59, 72))
 	boss.Shape = Enum.PartType.Ball
@@ -74,7 +74,7 @@ function DemoArenaService.buildIfNeeded()
 	local finishLine = createPart(arena, "BossApproach", Vector3.new(86, 1, 14), CFrame.new(0, 0.55, 53), Color3.fromRGB(92, 38, 55))
 	finishLine.Transparency = 0.3
 	finishLine.Material = Enum.Material.Neon
-	addWorldLabel(finishLine, "Boss 区：能量不足会失败", Color3.fromRGB(255, 193, 200))
+	addWorldLabel(finishLine, "BOSS ZONE: Low Energy means defeat", Color3.fromRGB(255, 193, 200))
 
 	print("[DemoArenaService] created tagged demo arena")
 end

@@ -220,7 +220,9 @@ local function onSlotTouched(binding: GroupBinding, slot: BasePart, touchedPart:
 	end
 	local before = MinionService.getFollowerCount(player)
 	local target = ModifierConfig.getTargetCount(before, definition)
-	local success, powerChange = MinionService.setFollowerCount(player, target)
+	local success, powerChange = if definition.operation == ModifierConfig.Operations.Multiply
+		then MinionService.setFollowerCountFromCurrentComposition(player, target)
+		else MinionService.setFollowerCount(player, target)
 	if not success then
 		return
 	end
@@ -229,7 +231,7 @@ local function onSlotTouched(binding: GroupBinding, slot: BasePart, touchedPart:
 	local powerText = if powerChange >= 0 then "+" .. math.floor(powerChange) else tostring(math.ceil(powerChange))
 	player:SetAttribute(
 		ATTRIBUTE.StatusMessage,
-		"士兵 " .. ModifierConfig.getLabel(definition) .. "：" .. before .. " → " .. target .. "，战力 " .. powerText
+		"Minions " .. ModifierConfig.getLabel(definition) .. ": " .. before .. " → " .. target .. ", Power " .. powerText
 	)
 	local remote = updateRemote
 	if remote ~= nil then

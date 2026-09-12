@@ -659,7 +659,7 @@ local function unlockMinionFromGamePassId(player: Player, gamePassId: number)
 	end
 	markDirty(state)
 	syncAttributes(player, state)
-	player:SetAttribute(ATTRIBUTE.StatusMessage, "新小兵已解锁！")
+	player:SetAttribute(ATTRIBUTE.StatusMessage, "New minion unlocked!")
 	notifyPlayer(player)
 	task.spawn(savePlayer, player)
 end
@@ -667,69 +667,69 @@ end
 local function onPurchaseRequested(player: Player, actionValue: unknown, minionTypeValue: unknown): { [string]: any }
 	local state = getStateForPurchase(player)
 	if state == nil then
-		return makeResponse(player, false, "商店数据加载中，请稍后再试。")
+		return makeResponse(player, false, "The shop is loading. Please try again.")
 	end
 
 	local now = os.clock()
 	if now - state.lastPurchaseAt < PURCHASE_COOLDOWN_SECONDS then
-		return makeResponse(player, false, "操作太快了，请稍后再试。")
+		return makeResponse(player, false, "Slow down and try again.")
 	end
 	state.lastPurchaseAt = now
 
 	if typeof(actionValue) ~= "string" then
-		return makeResponse(player, false, "无效的购买操作。")
+		return makeResponse(player, false, "Invalid purchase action.")
 	end
 
 	local action = actionValue
 	if action ~= ACTION.UnlockMinion and action ~= ACTION.UpgradeMinionEnergy then
-		return makeResponse(player, false, "无效的购买操作。")
+		return makeResponse(player, false, "Invalid purchase action.")
 	end
 
 	if typeof(minionTypeValue) ~= "string" or minionTypeValue == "" then
-		return makeResponse(player, false, "请选择有效的小兵。")
+		return makeResponse(player, false, "Please choose a valid minion.")
 	end
 	local minionType = minionTypeValue
 	if getTemplateBaseEnergy(minionType) == nil or getTemplateEnergyUpgradePerLevel(minionType) == nil then
-		return makeResponse(player, false, "小兵配置不存在。")
+		return makeResponse(player, false, "This minion is not available.")
 	end
 
 	if action == ACTION.UnlockMinion then
 		if PlayerShopService.isMinionUnlocked(player, minionType) then
-			return makeResponse(player, false, "该小兵已经解锁。")
+			return makeResponse(player, false, "This minion is already unlocked.")
 		end
 		local cost = ShopConfig.getMinionUnlockCost(minionType)
 		if not PlayerShopService.spendCoins(player, cost) then
-			return makeResponse(player, false, "游戏币不足。")
+			return makeResponse(player, false, "Not enough Coins.")
 		end
 		state.unlockedMinionTypes[minionType] = true
 		markDirty(state)
 		syncAttributes(player, state)
-		player:SetAttribute(ATTRIBUTE.StatusMessage, ShopConfig.getMinionDisplayName(minionType) .. " 已解锁！")
+		player:SetAttribute(ATTRIBUTE.StatusMessage, ShopConfig.getMinionDisplayName(minionType) .. " unlocked!")
 		notifyPlayer(player)
 		task.spawn(savePlayer, player)
-		return makeResponse(player, true, "小兵已解锁。")
+		return makeResponse(player, true, "Minion unlocked!")
 	elseif action == ACTION.UpgradeMinionEnergy then
 		if not PlayerShopService.isMinionUnlocked(player, minionType) then
-			return makeResponse(player, false, "该小兵尚未解锁。")
+			return makeResponse(player, false, "Unlock this minion first.")
 		end
 		local level = sanitizeMinionUpgradeLevel(state.minionEnergyUpgradeLevels[minionType])
 		local cost = ShopConfig.getMinionUpgradeCost(minionType, level)
 		if cost == nil then
-			return makeResponse(player, false, "该小兵能量已达到最高等级。")
+			return makeResponse(player, false, "This minion is already at max energy.")
 		end
 		if not PlayerShopService.spendCoins(player, cost) then
-			return makeResponse(player, false, "游戏币不足。")
+			return makeResponse(player, false, "Not enough Coins.")
 		end
 		state.minionEnergyUpgradeLevels[minionType] = level + 1
 		markDirty(state)
 		syncAttributes(player, state)
-		player:SetAttribute(ATTRIBUTE.StatusMessage, ShopConfig.getMinionDisplayName(minionType) .. " 能量已提升！")
+		player:SetAttribute(ATTRIBUTE.StatusMessage, ShopConfig.getMinionDisplayName(minionType) .. " energy upgraded!")
 		notifyPlayer(player)
 		task.spawn(savePlayer, player)
-		return makeResponse(player, true, "小兵能量已提升。")
+		return makeResponse(player, true, "Minion energy upgraded!")
 	end
 
-	return makeResponse(player, false, "无效的购买操作。")
+	return makeResponse(player, false, "Invalid purchase action.")
 end
 
 local function bindPlayer(player: Player)
@@ -808,7 +808,7 @@ end
 function PlayerShopService.tryUpgradeEnergyCapacity(player: Player): (boolean, string)
 	local state = getStateForPurchase(player)
 	if state == nil then
-		local message = "商店数据加载中，请稍后重新站上升级区域。"
+		local message = "The shop is loading. Step onto the upgrade zone again in a moment."
 		player:SetAttribute(ATTRIBUTE.StatusMessage, message)
 		return false, message
 	end
@@ -816,12 +816,12 @@ function PlayerShopService.tryUpgradeEnergyCapacity(player: Player): (boolean, s
 	local level = sanitizeCapacityUpgradeLevel(state.capacityUpgradeLevel)
 	local cost = ShopConfig.getCapacityUpgradeCost(level)
 	if cost == nil then
-		local message = "能量上限已达到最高等级。"
+		local message = "Energy capacity is already at max level."
 		player:SetAttribute(ATTRIBUTE.StatusMessage, message)
 		return false, message
 	end
 	if not PlayerShopService.spendCoins(player, cost) then
-		local message = "游戏币不足：升级能量上限需要 " .. cost .. " Coins。"
+		local message = "Not enough Coins. The capacity upgrade costs " .. cost .. " Coins."
 		player:SetAttribute(ATTRIBUTE.StatusMessage, message)
 		return false, message
 	end
@@ -841,7 +841,7 @@ function PlayerShopService.tryUpgradeEnergyCapacity(player: Player): (boolean, s
 		preservedEnergy = math.min(preservedEnergy, capacity)
 	end
 	player:SetAttribute(ATTRIBUTE.CurrentEnergy, preservedEnergy)
-	local message = "已花费 " .. cost .. " Coins，能量上限已提升！"
+	local message = "Spent " .. cost .. " Coins. Energy capacity upgraded!"
 	player:SetAttribute(ATTRIBUTE.StatusMessage, message)
 	notifyPlayer(player)
 	task.spawn(savePlayer, player)

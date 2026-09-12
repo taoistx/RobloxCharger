@@ -14,6 +14,8 @@ TreadmillConfig.Rewards = {
 	CoinsPerAward = 1,
 	-- 跑步机奖励结算间隔（秒）。
 	AwardIntervalSeconds = 1,
+	-- 检测玩家踏入、离开跑步机的间隔（秒）；也决定自动购买框的响应速度。
+	OccupancyCheckIntervalSeconds = 0.1,
 	-- 检测传送带上方角色时允许的最大高度（stud）。
 	CharacterCheckHeight = 6,
 	-- 检测角色是否位于传送带水平范围内时向内缩小的边距（stud）。
@@ -30,20 +32,10 @@ TreadmillConfig.GamePassIdByMultiplier = {
 	[100] = 0,
 } :: { [number]: number }
 
-TreadmillConfig.Prompt = {
-	-- 付费跑步机 ProximityPrompt 的实例名称。
-	Name = "TreadmillUnlockPrompt",
-	-- 玩家看到的交互对象文本。
-	ObjectText = "永久解锁跑步机",
-	-- 打开购买框所需的键盘按键。
-	KeyboardKeyCode = Enum.KeyCode.E,
-	-- 玩家可以触发提示的最大距离（stud）。
-	MaxActivationDistance = 12,
-	-- 按键需要持续按住的时间（秒）。
-	HoldDuration = 0,
-	-- 服务端校验玩家与传送带距离时相对提示距离增加的容差（stud）。
-	ServerDistanceTolerance = 3,
-	-- 同一玩家重复请求购买提示的服务端冷却时间（秒）。
+TreadmillConfig.AutoPurchasePrompt = {
+	-- 旧版本创建的 E 键 ProximityPrompt 名称；绑定时会将它清理掉。
+	LegacyInstanceName = "TreadmillUnlockPrompt",
+	-- 快速切换不同付费跑步机时，两次系统购买框之间的最短间隔（秒）。
 	CooldownSeconds = 1,
 }
 
