@@ -23,7 +23,6 @@ local BossService = require(script.Parent.Services:WaitForChild("BossService"))
 local TreadmillService = require(script.Parent.Services:WaitForChild("TreadmillService"))
 local FinalZoneService = require(script.Parent.Services:WaitForChild("FinalZoneService"))
 local DemoArenaService = require(script.Parent.Services:WaitForChild("DemoArenaService"))
-local TestEnergyRewardService = require(script.Parent.Services:WaitForChild("TestEnergyRewardService"))
 
 Players.RespawnTime = GameplayConfig.Defaults.PlayerRespawnSeconds
 
@@ -45,6 +44,5 @@ BossService.start()
 TreadmillService.start()
 FinalZoneService.start()
 DemoArenaService.buildIfNeeded()
-TestEnergyRewardService.start()
 
 print("[GameplayBootstrap] gameplay services started")

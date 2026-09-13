@@ -35,9 +35,9 @@ end
 local function updateLabel(label: TextLabel)
 	local cost = getCurrentCost()
 	if cost == nil then
-		label.Text = "Energy Capacity Upgrade\nMAX LEVEL"
+		label.Text = "Max Energy Upgrade : MAX"
 	else
-		label.Text = "Energy Capacity Upgrade\nPrice: " .. math.floor(cost) .. " Coins"
+		label.Text = "Max Energy Upgrade : " .. math.floor(cost)
 	end
 end
 

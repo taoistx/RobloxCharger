@@ -37,8 +37,6 @@ local ATTRIBUTE = GameplayConfig.Attributes
 local ZONE_VERTICAL_TOLERANCE = 8
 -- 单帧最多计入能量和 Coins 的移动速度（stud/秒），用于过滤瞬移。
 local MAX_DISTANCE_PER_FRAME_SPEED = 32
--- 移动方向达到该长度才视为玩家有意跑动。
-local MIN_MOVE_DIRECTION_MAGNITUDE = 0.05
 -- 单帧实际移动距离必须超过该值才计入跑动结算（stud）。
 local MIN_MOVEMENT_DISTANCE = 0.01
 
@@ -309,9 +307,9 @@ function PlayerEnergyService.start()
 			end
 
 			local distance = math.min((position - previousPosition).Magnitude, MAX_DISTANCE_PER_FRAME_SPEED * deltaTime)
-			local isRunning = humanoid.MoveDirection.Magnitude >= MIN_MOVE_DIRECTION_MAGNITUDE
-				and distance > MIN_MOVEMENT_DISTANCE
-			if isRunning then
+			-- 奖励以服务端观测到的角色实际位移为准。强制前进、传送带等
+			-- 运动不会写入 Humanoid.MoveDirection，因此不能把按键输入作为条件。
+			if distance > MIN_MOVEMENT_DISTANCE then
 				awardEnergyForRunningDistance(player, state, distance)
 				PlayerShopService.addRunningDistance(player, distance)
 			else

@@ -148,7 +148,10 @@ local function ensureAssignment(state: PlayerState, binding: GroupBinding): Assi
 	return assignment
 end
 
-local function resetCharacterState(state: PlayerState, character: Model?)
+local function resetCharacterState(player: Player, state: PlayerState, character: Model?)
+	if state.character == character then
+		return
+	end
 	state.character = character
 	table.clear(state.assignments)
 	table.clear(state.consumed)
@@ -157,6 +160,12 @@ local function resetCharacterState(state: PlayerState, character: Model?)
 	if character ~= nil then
 		for _, binding in bindings do
 			ensureAssignment(state, binding)
+		end
+		local remote = updateRemote
+		if remote ~= nil then
+			-- A nil group is the player-scoped reset signal for this character.
+			-- It prevents local visibility from depending only on client event order.
+			remote:FireClient(player, nil, character, false)
 		end
 	end
 end
@@ -168,7 +177,7 @@ local function ensureCurrentCharacterState(player: Player): PlayerState?
 		return nil
 	end
 	if state.character ~= character then
-		resetCharacterState(state, character)
+		resetCharacterState(player, state, character)
 	end
 	return state
 end
@@ -220,9 +229,13 @@ local function onSlotTouched(binding: GroupBinding, slot: BasePart, touchedPart:
 	end
 	local before = MinionService.getFollowerCount(player)
 	local target = ModifierConfig.getTargetCount(before, definition)
-	local success, powerChange = if definition.operation == ModifierConfig.Operations.Multiply
-		then MinionService.setFollowerCountFromCurrentComposition(player, target)
-		else MinionService.setFollowerCount(player, target)
+	local success: boolean
+	local powerChange: number
+	if definition.operation == ModifierConfig.Operations.Multiply then
+		success, powerChange = MinionService.setFollowerCountFromCurrentComposition(player, target)
+	else
+		success, powerChange = MinionService.setFollowerCount(player, target)
+	end
 	if not success then
 		return
 	end
@@ -368,15 +381,15 @@ local function bindPlayer(player: Player)
 	}
 	playerStates[player] = state
 	table.insert(state.connections, player.CharacterAdded:Connect(function(character)
-		resetCharacterState(state, character)
+		resetCharacterState(player, state, character)
 	end))
 	table.insert(state.connections, player.CharacterRemoving:Connect(function(character)
 		if state.character == character then
-			resetCharacterState(state, nil)
+			resetCharacterState(player, state, nil)
 		end
 	end))
 	if player.Character ~= nil then
-		resetCharacterState(state, player.Character)
+		resetCharacterState(player, state, player.Character)
 	end
 end
 
@@ -388,7 +401,7 @@ local function unbindPlayer(player: Player)
 	for _, connection in state.connections do
 		connection:Disconnect()
 	end
-	resetCharacterState(state, nil)
+	resetCharacterState(player, state, nil)
 	playerStates[player] = nil
 end
 

@@ -51,6 +51,7 @@ local updateRemote = ReplicatedStorage:WaitForChild(
 	GameplayConfig.InstanceNames.RandomMinionModifierUpdate
 ) :: RemoteEvent
 local bindings: { [Model]: GroupBinding } = {}
+local presentedCharacter: Model? = nil
 
 local POSITIVE_COLOR = Color3.fromRGB(65, 205, 95)
 local NEGATIVE_COLOR = Color3.fromRGB(230, 70, 75)
@@ -346,11 +347,31 @@ local function bind(instance: Instance)
 	requestAssignment(binding)
 end
 
+local function refreshGroupsForCharacter(character: Model)
+	if player.Character ~= character or presentedCharacter == character then
+		return
+	end
+	presentedCharacter = character
+	for _, binding in bindings do
+		setGroupHidden(binding, false)
+		requestAssignment(binding)
+	end
+end
+
 updateRemote.OnClientEvent:Connect(function(groupValue: unknown, characterValue: unknown, consumedValue: unknown)
-	if typeof(groupValue) ~= "Instance" or not (groupValue :: Instance):IsA("Model")
-		or typeof(characterValue) ~= "Instance" or not (characterValue :: Instance):IsA("Model")
+	if typeof(characterValue) ~= "Instance" or not (characterValue :: Instance):IsA("Model")
 		or player.Character ~= characterValue
 	then
+		return
+	end
+	local character = characterValue :: Model
+	if groupValue == nil then
+		if consumedValue == false then
+			refreshGroupsForCharacter(character)
+		end
+		return
+	end
+	if typeof(groupValue) ~= "Instance" or not (groupValue :: Instance):IsA("Model") then
 		return
 	end
 	local binding = bindings[groupValue :: Model]
@@ -367,6 +388,7 @@ updateRemote.OnClientEvent:Connect(function(groupValue: unknown, characterValue:
 end)
 
 player.CharacterRemoving:Connect(function()
+	presentedCharacter = nil
 	for _, binding in bindings do
 		binding.requestSerial += 1
 		clearVisuals(binding)
@@ -374,13 +396,10 @@ player.CharacterRemoving:Connect(function()
 	end
 end)
 
-player.CharacterAdded:Connect(function()
-	for _, binding in bindings do
-		-- Do not wait for the RemoteFunction round trip before undoing the
-		-- previous character's local-only transparency.
-		setGroupHidden(binding, false)
-		requestAssignment(binding)
-	end
+player.CharacterAdded:Connect(function(character)
+	-- The server sends the same character reset as a fallback; the character
+	-- guard makes both event paths idempotent.
+	refreshGroupsForCharacter(character)
 end)
 
 CollectionService:GetInstanceAddedSignal(TAG):Connect(bind)
@@ -388,3 +407,4 @@ CollectionService:GetInstanceRemovedSignal(TAG):Connect(unbind)
 for _, instance in CollectionService:GetTagged(TAG) do
 	bind(instance)
 end
+presentedCharacter = player.Character
