@@ -12,6 +12,8 @@ GameplayConfig.Tags = {
 	RandomMinionModifierGroup = "RandomMinionModifierGroup",
 	Trap = "Trap",
 	KillZone = "KillZone",
+	-- 玩家触碰后返回出生点、清空本局战力和跟随士兵，并获得配置 Coins 的区域。
+	ReturnToSpawn = "ReturnToSpawn",
 	Boss = "Boss",
 	Shop = "Shop",
 	EnergyCapacityUpgrade = "EnergyCapacityUpgrade",
@@ -33,6 +35,8 @@ GameplayConfig.Attributes = {
 	IsInGameZone = "IsInGameZone",
 	ZoneIndex = "ZoneIndex",
 	CurrentGameZoneIndex = "CurrentGameZoneIndex",
+	-- 服务端递增以要求客户端即使未重生也切回起始背景音乐。
+	MusicResetSequence = "MusicResetSequence",
 	ForcedRunSpeed = "ForcedRunSpeed",
 	ForcedRunDirection = "ForcedRunDirection",
 	ForcedRunActive = "ForcedRunActive",
@@ -46,6 +50,7 @@ GameplayConfig.Attributes = {
 	-- Minion 模板在商店卡片中显示的图片资源 ID。
 	MinionIconId = "MinionIconId",
 	EnergyDamage = "EnergyDamage",
+	CoinReward = "CoinReward",
 	MinionType = "MinionType",
 	Operation = "Operation",
 	Operand = "Operand",
@@ -75,6 +80,10 @@ GameplayConfig.Attributes = {
 	TreadmillEnabled = "TreadmillEnabled",
 	TreadmillGamePassId = "TreadmillGamePassId",
 	ActiveTreadmillMultiplier = "ActiveTreadmillMultiplier",
+	-- 服务端同步当前远程配置实际启用的跑步机奖励倍率；0 表示奖励暂停。
+	EffectiveTreadmillMultiplier = "EffectiveTreadmillMultiplier",
+	-- 服务端同步本次会话是否允许推进并显示新手引导。
+	TutorialEnabled = "TutorialEnabled",
 }
 
 GameplayConfig.FollowerStates = {
@@ -131,6 +140,11 @@ GameplayConfig.Final = {
 	},
 }
 
+GameplayConfig.ReturnToSpawn = {
+	-- 返航时每名当前跟随士兵可额外兑换的 Coins 数量。
+	CoinsPerFollower = 2,
+}
+
 GameplayConfig.BackgroundMusic = {
 	-- 全局背景音乐在每位玩家的客户端循环播放。
 	SoundId = "rbxassetid://139242395374944",
@@ -151,7 +165,7 @@ GameplayConfig.Defaults = {
 	-- 玩家基础战力容量；当前容量公式为基础容量加 EnergyCapacityUpgrade 区域购买的升级加成。
 	BaseCapacity = 50,
 	-- 预留的等级容量增量配置；当前容量不再按等级增长。
-	CapacityPerLevel = 100,
+	CapacityPerLevel = 20,
 	-- 每个完整跑动距离结算段换算的战力（战力/stud）。
 	EnergyPerStud = 0,
 	-- 累计多少 studs 才结算一份跑动战力，未满部分保留到下一次跑动。
@@ -166,6 +180,8 @@ GameplayConfig.Defaults = {
 	MinionSpawnMinSpacing = 5,
 	-- 同一玩家触发同一个陷阱的服务端冷却时间（秒）。
 	TrapTouchCooldownSeconds = 1,
+	-- 同一玩家触发同一个 ReturnToSpawn 区域的服务端冷却时间（秒）。
+	ReturnToSpawnTouchCooldownSeconds = 1,
 	-- 未设置 Boss RequiredEnergy 属性时的保留默认门槛。
 	BossRequiredEnergy = 100,
 }
@@ -279,6 +295,8 @@ GameplayConfig.Limits = {
 	MaxEnergyValue = 1000000,
 	-- Boss RequiredEnergy 属性的校验上限。
 	MaxBossRequiredEnergy = 1000000,
+	-- ReturnToSpawn 单次 Coins 奖励的配置上限。
+	MaxCoinReward = 1000000,
 	-- GameZone.ZoneIndex 属性的校验上限。
 	MaxGameZoneIndex = 1000000,
 	-- GameZone 强制前进速度的校验上限（stud/秒）。

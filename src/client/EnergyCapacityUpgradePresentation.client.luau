@@ -17,27 +17,26 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 local ShopConfig = require(Shared:WaitForChild("ShopConfig"))
 
+local snapshotRemote = ReplicatedStorage:WaitForChild(GameplayConfig.InstanceNames.ShopGetSnapshot)
+local updatedRemote = ReplicatedStorage:WaitForChild(GameplayConfig.InstanceNames.ShopUpdated)
+
 type Binding = {
 	connections: { RBXScriptConnection },
 	label: TextLabel,
 }
 
 local TAG = GameplayConfig.Tags.EnergyCapacityUpgrade
-local ATTRIBUTE = GameplayConfig.Attributes
 local bindings: { [BasePart]: Binding } = {}
-
-local function getCurrentCost(): number?
-	local value = player:GetAttribute(ATTRIBUTE.EnergyCapacityUpgradeLevel)
-	local level = if typeof(value) == "number" then value else 0
-	return ShopConfig.getCapacityUpgradeCost(level)
-end
+local currentCost: number? = nil
+local snapshotLoaded = false
 
 local function updateLabel(label: TextLabel)
-	local cost = getCurrentCost()
-	if cost == nil then
+	if not snapshotLoaded then
+		label.Text = "Max Energy Upgrade : LOADING"
+	elseif currentCost == nil then
 		label.Text = "Max Energy Upgrade : MAX"
 	else
-		label.Text = "Max Energy Upgrade : " .. math.floor(cost)
+		label.Text = "Max Energy Upgrade : " .. math.floor(currentCost)
 	end
 end
 
@@ -107,7 +106,34 @@ Workspace.DescendantAdded:Connect(function(instance)
 		bind(instance)
 	end
 end)
-player:GetAttributeChangedSignal(ATTRIBUTE.EnergyCapacityUpgradeLevel):Connect(updateAllLabels)
+local function applyShopSnapshot(snapshotValue: unknown)
+	if typeof(snapshotValue) ~= "table" then
+		return
+	end
+	local cost = snapshotValue.capacityUpgradeCost
+	if cost ~= nil and (typeof(cost) ~= "number" or cost ~= cost or cost < 0) then
+		return
+	end
+	currentCost = if cost == nil then nil else cost :: number
+	snapshotLoaded = true
+	updateAllLabels()
+end
+
+if snapshotRemote:IsA("RemoteFunction") and updatedRemote:IsA("RemoteEvent") then
+	updatedRemote.OnClientEvent:Connect(applyShopSnapshot)
+	task.spawn(function()
+		local success, snapshotOrError = pcall(function()
+			return snapshotRemote:InvokeServer()
+		end)
+		if success then
+			applyShopSnapshot(snapshotOrError)
+		else
+			warn("[EnergyCapacityUpgradePresentation] unable to load shop snapshot: " .. tostring(snapshotOrError))
+		end
+	end)
+else
+	warn("[EnergyCapacityUpgradePresentation] shop snapshot remotes are not configured correctly")
+end
 
 local soundConfig = ShopConfig.EnergyCapacityUpgrades.Feedback
 local successSound = Instance.new("Sound")

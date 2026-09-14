@@ -2,12 +2,21 @@
 
 local TreadmillConfig = {}
 
--- 带 Treadmill Tag 的模型名称格式；倍率从名称解析，名称是奖励倍率的权威来源。
+-- 带 Treadmill Tag 的模型名称格式；倍率从名称解析。
 TreadmillConfig.ModelNamePattern = "^x(%d+)%s+treadmill$"
 -- 跑步机模型内承载玩家的传送带 BasePart 名称。
 TreadmillConfig.ConveyorPartName = "Conveyor"
 -- 模型名称允许解析出的最大倍率。
 TreadmillConfig.MaxMultiplier = 100000
+
+-- 现有跑步机模型名到实际显示/奖励倍率的映射。
+-- 这样可以在不改动场景模型名称和其 Game Pass 归属的情况下调整倍率。
+TreadmillConfig.MultiplierRemap = {
+	[3] = 15,
+	[15] = 50,
+	[50] = 100,
+	[100] = 100,
+} :: { [number]: number }
 
 TreadmillConfig.Rewards = {
 	-- 每次结算发放的基础 Coins 数量，再乘以跑步机倍率。
@@ -22,7 +31,7 @@ TreadmillConfig.Rewards = {
 	HorizontalInsetStuds = 0.35,
 }
 
--- x1 免费；x3、x15、x50 通过一次性 Game Pass 永久解锁。
+-- 原 x1 免费；其余已配置倍率通过一次性 Game Pass 永久解锁。
 TreadmillConfig.PaidMultiplierThreshold = 3
 TreadmillConfig.GamePassIdByMultiplier = {
 	-- 各倍率对应的 Game Pass ID，必须与 Creator Dashboard 中的通行证一致。
@@ -40,6 +49,14 @@ TreadmillConfig.AutoPurchasePrompt = {
 }
 
 function TreadmillConfig.parseMultiplier(modelName: string): number?
+	local modelMultiplier = TreadmillConfig.parseModelMultiplier(modelName)
+	if modelMultiplier == nil then
+		return nil
+	end
+	return TreadmillConfig.getEffectiveMultiplier(modelMultiplier)
+end
+
+function TreadmillConfig.parseModelMultiplier(modelName: string): number?
 	local multiplierText = string.match(string.lower(modelName), TreadmillConfig.ModelNamePattern)
 	if multiplierText == nil then
 		return nil
@@ -50,6 +67,19 @@ function TreadmillConfig.parseMultiplier(modelName: string): number?
 		return nil
 	end
 	return math.floor(multiplier)
+end
+
+function TreadmillConfig.getEffectiveMultiplier(modelMultiplier: number, multiplierRemap: { [number]: number }?): number
+	local remappedMultiplier = if multiplierRemap ~= nil
+		then multiplierRemap[modelMultiplier]
+		else TreadmillConfig.MultiplierRemap[modelMultiplier]
+	if typeof(remappedMultiplier) == "number"
+		and remappedMultiplier >= 1
+		and remappedMultiplier <= TreadmillConfig.MaxMultiplier
+	then
+		return math.floor(remappedMultiplier)
+	end
+	return math.floor(modelMultiplier)
 end
 
 function TreadmillConfig.getConfiguredGamePassId(multiplier: number): number?

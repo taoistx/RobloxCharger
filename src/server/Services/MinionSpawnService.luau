@@ -437,6 +437,16 @@ local function cleanupSpawnedPickups(state: PlayerSpawnState)
 	table.clear(state.spawnedZoneIndices)
 end
 
+-- Clears this player's current-life picker session. The next valid GameZone
+-- entry creates a fresh set using the same path as a newly spawned character.
+function MinionSpawnService.resetPlayerSession(player: Player)
+	local state = states[player]
+	if state == nil then
+		return
+	end
+	cleanupSpawnedPickups(state)
+end
+
 local function createPlayerFolder(player: Player, zoneIndex: number): Folder
 	local folder = Instance.new("Folder")
 	folder.Name = "Player_" .. player.UserId .. "_Zone_" .. zoneIndex

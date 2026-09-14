@@ -246,6 +246,7 @@ local function update()
 		or currentHumanoid == nil
 		or currentHumanoid.Health <= 0
 		or currentRoot == nil
+		or player:GetAttribute(ATTRIBUTE.TutorialEnabled) ~= true
 	then
 		destroyGuide()
 		return
@@ -364,6 +365,13 @@ table.insert(connections, player:GetAttributeChangedSignal(TutorialConfig.StageA
 	lastRequestedStage = nil
 	lastRequestAt = -math.huge
 	if not TutorialConfig.isActiveStage(player:GetAttribute(TutorialConfig.StageAttribute)) then
+		destroyGuide()
+	end
+end))
+table.insert(connections, player:GetAttributeChangedSignal(ATTRIBUTE.TutorialEnabled):Connect(function()
+	lastRequestedStage = nil
+	lastRequestAt = -math.huge
+	if player:GetAttribute(ATTRIBUTE.TutorialEnabled) ~= true then
 		destroyGuide()
 	end
 end))

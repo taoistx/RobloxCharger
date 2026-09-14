@@ -15,6 +15,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 local TutorialConfig = require(Shared:WaitForChild("TutorialConfig"))
+local ExperienceConfigService = require(script.Parent:WaitForChild("ExperienceConfigService"))
 
 type SavedTutorial = {
 	version: number,
@@ -46,6 +47,10 @@ local tutorialStore: GlobalDataStore? = nil
 local nextStoreRetryAt = 0
 local targetReachedRemote: RemoteEvent? = nil
 local started = false
+
+local function isTutorialEnabled(): boolean
+	return ExperienceConfigService.getSnapshot().features.tutorialEnabled
+end
 
 local function disconnectAll(connections: { RBXScriptConnection })
 	for _, connection in connections do
@@ -288,7 +293,12 @@ end
 
 local function onTargetReached(player: Player, stageValue: unknown)
 	local state = states[player]
-	if state == nil or not state.loaded or player.Parent ~= Players or typeof(stageValue) ~= "string" then
+	if not isTutorialEnabled()
+		or state == nil
+		or not state.loaded
+		or player.Parent ~= Players
+		or typeof(stageValue) ~= "string"
+	then
 		return
 	end
 	local now = os.clock()
@@ -311,6 +321,9 @@ local function onTargetReached(player: Player, stageValue: unknown)
 end
 
 local function onCharacterDied(player: Player)
+	if not isTutorialEnabled() then
+		return
+	end
 	local state = states[player]
 	if state == nil then
 		return
@@ -370,9 +383,11 @@ local function loadPlayer(player: Player)
 	local pendingDeaths = state.pendingDeaths
 	state.pendingDeaths = 0
 	local changed = false
-	for _ = 1, pendingDeaths do
-		if advanceForDeath(player, state) then
-			changed = true
+	if isTutorialEnabled() then
+		for _ = 1, pendingDeaths do
+			if advanceForDeath(player, state) then
+				changed = true
+			end
 		end
 	end
 	syncStage(player, state)
@@ -398,6 +413,7 @@ local function bindPlayer(player: Player)
 	}
 	states[player] = state
 	player:SetAttribute(TutorialConfig.StageAttribute, nil)
+	player:SetAttribute(ATTRIBUTE.TutorialEnabled, isTutorialEnabled())
 	table.insert(state.playerConnections, player.CharacterAdded:Connect(function(character)
 		task.spawn(watchCharacter, player, character)
 	end))
@@ -419,6 +435,7 @@ local function unbindPlayer(player: Player)
 	end
 	savePlayer(player)
 	states[player] = nil
+	player:SetAttribute(ATTRIBUTE.TutorialEnabled, nil)
 end
 
 function TutorialService.start()
@@ -435,6 +452,12 @@ function TutorialService.start()
 	end
 	Players.PlayerAdded:Connect(bindPlayer)
 	Players.PlayerRemoving:Connect(unbindPlayer)
+	ExperienceConfigService.getChangedSignal():Connect(function()
+		local enabled = isTutorialEnabled()
+		for player in states do
+			player:SetAttribute(ATTRIBUTE.TutorialEnabled, enabled)
+		end
+	end)
 
 	game:BindToClose(function()
 		for player, state in states do

@@ -17,6 +17,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 local ShopConfig = require(Shared:WaitForChild("ShopConfig"))
+local ExperienceConfigService = require(script.Parent:WaitForChild("ExperienceConfigService"))
 local GameplayUtil = require(script.Parent:WaitForChild("GameplayUtil"))
 
 type PlayerState = {
@@ -445,7 +446,7 @@ local function applySavedState(state: PlayerState, saved: unknown)
 		end
 	end
 
-	local distancePerAward = math.max(0.001, ShopConfig.CoinRewards.DistancePerAward)
+	local distancePerAward = ExperienceConfigService.getSnapshot().runCoinDistance
 	state.coinDistanceRemainder %= distancePerAward
 end
 
@@ -509,6 +510,9 @@ end
 
 local function buildSnapshot(player: Player): ShopSnapshot
 	local state = states[player] or getDefaultState()
+	local experienceConfig = ExperienceConfigService.getSnapshot()
+	local minionShop = experienceConfig.minionShop
+	local capacityCurve = experienceConfig.capacityUpgradeCurve
 	local minions: { MinionSnapshot } = {}
 	for _, minionType in getKnownMinionTypes() do
 		local baseEnergy = getTemplateBaseEnergy(minionType)
@@ -531,8 +535,8 @@ local function buildSnapshot(player: Player): ShopSnapshot
 			)),
 			energyUpgradePerLevel = energyUpgradePerLevel,
 			upgradeLevel = upgradeLevel,
-			upgradeCost = ShopConfig.getMinionUpgradeCost(minionType, upgradeLevel),
-			unlockCoinCost = ShopConfig.getMinionUnlockCost(minionType),
+			upgradeCost = ShopConfig.getMinionUpgradeCost(minionType, upgradeLevel, minionShop),
+			unlockCoinCost = ShopConfig.getMinionUnlockCost(minionType, minionShop),
 			gamePassId = getGamePassId(minionType),
 		})
 	end
@@ -547,8 +551,8 @@ local function buildSnapshot(player: Player): ShopSnapshot
 	return {
 		coins = state.coins,
 		capacityUpgradeLevel = sanitizeCapacityUpgradeLevel(state.capacityUpgradeLevel),
-		capacityUpgradeCost = ShopConfig.getCapacityUpgradeCost(state.capacityUpgradeLevel),
-		capacityBonus = ShopConfig.getCapacityBonus(state.capacityUpgradeLevel),
+		capacityUpgradeCost = ShopConfig.getCapacityUpgradeCost(state.capacityUpgradeLevel, capacityCurve),
+		capacityBonus = ShopConfig.getCapacityBonus(state.capacityUpgradeLevel, capacityCurve),
 		minions = minions,
 	}
 end
@@ -620,6 +624,12 @@ local function loadPlayer(player: Player)
 		warn("[PlayerShopService] failed to load shop state for " .. player.Name .. ": " .. tostring(savedOrError))
 	end
 	state.loaded = true
+	if not ExperienceConfigService.getSnapshot().features.runCoinRewardsEnabled
+		and state.coinDistanceRemainder ~= 0
+	then
+		state.coinDistanceRemainder = 0
+		markDirty(state)
+	end
 	state.revision += 1
 	syncOwnedGamePasses(player, false)
 	syncAttributes(player, state)
@@ -697,7 +707,10 @@ local function onPurchaseRequested(player: Player, actionValue: unknown, minionT
 		if PlayerShopService.isMinionUnlocked(player, minionType) then
 			return makeResponse(player, false, "This minion is already unlocked.")
 		end
-		local cost = ShopConfig.getMinionUnlockCost(minionType)
+		local cost = ShopConfig.getMinionUnlockCost(
+			minionType,
+			ExperienceConfigService.getSnapshot().minionShop
+		)
 		if not PlayerShopService.spendCoins(player, cost) then
 			return makeResponse(player, false, "Not enough Coins.")
 		end
@@ -713,7 +726,11 @@ local function onPurchaseRequested(player: Player, actionValue: unknown, minionT
 			return makeResponse(player, false, "Unlock this minion first.")
 		end
 		local level = sanitizeMinionUpgradeLevel(state.minionEnergyUpgradeLevels[minionType])
-		local cost = ShopConfig.getMinionUpgradeCost(minionType, level)
+		local cost = ShopConfig.getMinionUpgradeCost(
+			minionType,
+			level,
+			ExperienceConfigService.getSnapshot().minionShop
+		)
 		if cost == nil then
 			return makeResponse(player, false, "This minion is already at max energy.")
 		end
@@ -757,7 +774,16 @@ function PlayerShopService.addRunningDistance(player: Player, distance: number)
 		return
 	end
 
-	local distancePerAward = math.max(0.001, ShopConfig.CoinRewards.DistancePerAward)
+	local experienceConfig = ExperienceConfigService.getSnapshot()
+	if not experienceConfig.features.runCoinRewardsEnabled then
+		if state.coinDistanceRemainder ~= 0 then
+			state.coinDistanceRemainder = 0
+			markDirty(state)
+		end
+		return
+	end
+
+	local distancePerAward = experienceConfig.runCoinDistance
 	local awardCount = math.floor((state.coinDistanceRemainder + distance) / distancePerAward)
 	state.coinDistanceRemainder = (state.coinDistanceRemainder + distance) - awardCount * distancePerAward
 	if awardCount <= 0 then
@@ -765,11 +791,13 @@ function PlayerShopService.addRunningDistance(player: Player, distance: number)
 		return
 	end
 
-	local awardedCoins = math.max(0, math.floor(ShopConfig.CoinRewards.CoinsPerAward)) * awardCount
+	local awardedCoins = experienceConfig.runCoinReward * awardCount
 	PlayerShopService.addCoins(player, awardedCoins)
 end
 
-function PlayerShopService.addCoins(player: Player, amount: number): boolean
+-- The optional presentation flag only changes the receiving client's popup
+-- anchor. Currency amount and persistence remain entirely server-authoritative.
+function PlayerShopService.addCoins(player: Player, amount: number, showAtCharacterHead: boolean?): boolean
 	local state = states[player]
 	if state == nil or not state.loaded or amount ~= amount or amount <= 0 then
 		return false
@@ -785,7 +813,7 @@ function PlayerShopService.addCoins(player: Player, amount: number): boolean
 	notifyPlayer(player)
 	local feedbackRemote = coinAwardFeedbackRemote
 	if feedbackRemote ~= nil then
-		feedbackRemote:FireClient(player, awardedCoins)
+		feedbackRemote:FireClient(player, awardedCoins, showAtCharacterHead == true)
 	end
 	return true
 end
@@ -814,7 +842,10 @@ function PlayerShopService.tryUpgradeEnergyCapacity(player: Player): (boolean, s
 	end
 
 	local level = sanitizeCapacityUpgradeLevel(state.capacityUpgradeLevel)
-	local cost = ShopConfig.getCapacityUpgradeCost(level)
+	local cost = ShopConfig.getCapacityUpgradeCost(
+		level,
+		ExperienceConfigService.getSnapshot().capacityUpgradeCurve
+	)
 	if cost == nil then
 		local message = "Energy capacity is already at max level."
 		player:SetAttribute(ATTRIBUTE.StatusMessage, message)
@@ -891,7 +922,7 @@ end
 function PlayerShopService.getCapacityBonus(player: Player): number
 	local state = states[player]
 	local level = if state ~= nil and state.loaded then state.capacityUpgradeLevel else 0
-	return ShopConfig.getCapacityBonus(level)
+	return ShopConfig.getCapacityBonus(level, ExperienceConfigService.getSnapshot().capacityUpgradeCurve)
 end
 
 function PlayerShopService.getSnapshot(player: Player): ShopSnapshot
@@ -940,6 +971,17 @@ function PlayerShopService.start()
 	end
 	Players.PlayerAdded:Connect(bindPlayer)
 	Players.PlayerRemoving:Connect(unbindPlayer)
+	ExperienceConfigService.getChangedSignal():Connect(function()
+		local experienceConfig = ExperienceConfigService.getSnapshot()
+		for player, state in states do
+			if not experienceConfig.features.runCoinRewardsEnabled and state.coinDistanceRemainder ~= 0 then
+				state.coinDistanceRemainder = 0
+				markDirty(state)
+				task.spawn(savePlayer, player)
+			end
+			notifyPlayer(player)
+		end
+	end)
 
 	game:BindToClose(function()
 		for player in states do

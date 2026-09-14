@@ -92,6 +92,13 @@ player:GetAttributeChangedSignal(attributes.IsInGameZone):Connect(function()
 	setMusicForZone(true, false)
 end)
 
+-- ReturnToSpawn keeps the same character alive, so its server-authoritative
+-- reset signal deliberately overrides the usual per-life GameZone music lock.
+player:GetAttributeChangedSignal(attributes.MusicResetSequence):Connect(function()
+	enteredGameZoneThisLife = false
+	setMusicForZone(false, false)
+end)
+
 player.CharacterAdded:Connect(function()
 	enteredGameZoneThisLife = false
 	setMusicForZone(false, false)

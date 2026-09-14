@@ -16,6 +16,7 @@ local CollectionService = game:GetService("CollectionService")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 local GameplayUtil = require(script.Parent:WaitForChild("GameplayUtil"))
+local ExperienceConfigService = require(script.Parent:WaitForChild("ExperienceConfigService"))
 local PlayerShopService = require(script.Parent:WaitForChild("PlayerShopService"))
 
 type PlayerState = {
@@ -219,6 +220,21 @@ function PlayerEnergyService.setEnergy(player: Player, value: number)
 	player:SetAttribute(ATTRIBUTE.CurrentEnergy, math.clamp(value, 0, capacity))
 end
 
+-- Restores the per-character energy and GameZone state for a living player.
+-- The position sample is taken after a controlled teleport so it cannot count
+-- as running distance during the next Heartbeat.
+function PlayerEnergyService.resetPlayerSession(player: Player)
+	local state = states[player]
+	if state ~= nil then
+		state.lastPosition = if state.rootPart ~= nil then state.rootPart.Position else nil
+		state.distanceUntilEnergyAward = GameplayConfig.Defaults.DistancePerEnergyAward
+	end
+	PlayerEnergyService.setEnergy(player, 0)
+	player:SetAttribute(ATTRIBUTE.IsInGameZone, false)
+	player:SetAttribute(ATTRIBUTE.CurrentGameZoneIndex, nil)
+	player:SetAttribute(ATTRIBUTE.BossImpactSequence, 0)
+end
+
 function PlayerEnergyService.addEnergy(player: Player, value: number): number
 	if value <= 0 then
 		return 0
@@ -230,6 +246,13 @@ end
 
 function PlayerEnergyService.canAddEnergy(player: Player): boolean
 	return getEnergy(player) < getCapacity(player)
+end
+
+-- Returns the combat-power budget that can still be represented by followers.
+-- Callers that create a follower must reserve its entire EnergyValue before
+-- adding its visual source; addEnergy intentionally clamps generic rewards.
+function PlayerEnergyService.getRemainingEnergyCapacity(player: Player): number
+	return math.max(0, getCapacity(player) - getEnergy(player))
 end
 
 function PlayerEnergyService.removeEnergy(player: Player, value: number): number
@@ -286,6 +309,12 @@ function PlayerEnergyService.start()
 	end
 	Players.PlayerAdded:Connect(bindPlayer)
 	Players.PlayerRemoving:Connect(unbindPlayer)
+	ExperienceConfigService.getChangedSignal():Connect(function()
+		for player in states do
+			local capacity = setCapacity(player)
+			PlayerEnergyService.setEnergy(player, math.min(getEnergy(player), capacity))
+		end
+	end)
 
 	RunService.Heartbeat:Connect(function(deltaTime)
 		for player, state in states do

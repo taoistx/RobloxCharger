@@ -1,12 +1,27 @@
 --!strict
 
 local ShopConfig = {}
+local MAX_SAFE_INTEGER = 9007199254740991
 
 export type MinionConfig = {
 	displayName: string?,
 	unlockCoinCost: number?,
 	upgradeBaseCost: number?,
 	gamePassId: number?,
+}
+
+export type MinionShopBalance = {
+	defaultUnlockCoinCost: number,
+	unlockCoinCostByMinionType: { [string]: number },
+	defaultUpgradeBaseCost: number,
+	upgradeBaseCostByMinionType: { [string]: number },
+	upgradeCostMultiplier: number,
+}
+
+export type CapacityUpgradeCurve = {
+	baseCost: number,
+	costMultiplier: number,
+	capacityPerLevel: number,
 }
 
 -- 游戏币、容量升级、小兵解锁和小兵能量升级使用的 DataStore 名称。
@@ -35,6 +50,16 @@ ShopConfig.CoinPresentation = {
 		PopupDurationSeconds = 0.7,
 		-- Coins 浮字上升距离（stud）。
 		PopupRiseStuds = 2.5,
+	},
+	-- ReturnToSpawn 的 Coins 在角色头顶显示，节奏比普通 Coins 浮字更慢。
+	ReturnToSpawnFeedback = {
+		-- 返航奖励浮字显示时长（秒）。
+		PopupDurationSeconds = 1.2,
+		-- 返航奖励浮字上升距离（stud）。
+		PopupRiseStuds = 1.1,
+		-- 返航奖励浮字的水平漂移范围（stud）。
+		HorizontalDriftMin = 0.2,
+		HorizontalDriftMax = 0.55,
 	},
 }
 
@@ -131,7 +156,10 @@ local function getScaledCost(baseCost: number, multiplier: number, currentLevel:
 	if safeLevel >= maxLevel then
 		return nil
 	end
-	return math.max(0, math.ceil(math.max(0, baseCost) * multiplier ^ safeLevel))
+	return math.min(
+		MAX_SAFE_INTEGER,
+		math.max(0, math.ceil(math.max(0, baseCost) * multiplier ^ safeLevel))
+	)
 end
 
 function ShopConfig.getMinionConfig(minionType: string): MinionConfig
@@ -146,9 +174,16 @@ function ShopConfig.getMinionDisplayName(minionType: string): string
 	return minionType
 end
 
-function ShopConfig.getMinionUnlockCost(minionType: string): number
+function ShopConfig.getMinionUnlockCost(minionType: string, balance: MinionShopBalance?): number
 	if minionType == ShopConfig.DefaultUnlockedMinionType then
 		return 0
+	end
+	if balance ~= nil then
+		local configuredCost = balance.unlockCoinCostByMinionType[minionType]
+		if configuredCost ~= nil then
+			return math.floor(configuredCost)
+		end
+		return math.floor(balance.defaultUnlockCoinCost)
 	end
 	local config = ShopConfig.getMinionConfig(minionType)
 	if typeof(config.unlockCoinCost) == "number" and config.unlockCoinCost >= 0 then
@@ -157,23 +192,36 @@ function ShopConfig.getMinionUnlockCost(minionType: string): number
 	return ShopConfig.MinionUnlocks.DefaultCoinCost
 end
 
-function ShopConfig.getMinionUpgradeCost(minionType: string, currentLevel: number): number?
+function ShopConfig.getMinionUpgradeCost(
+	minionType: string,
+	currentLevel: number,
+	balance: MinionShopBalance?
+): number?
 	local config = ShopConfig.getMinionConfig(minionType)
-	local baseCost = if typeof(config.upgradeBaseCost) == "number"
-		then config.upgradeBaseCost
-		else ShopConfig.MinionEnergyUpgrades.BaseCost
+	local baseCost: number
+	local costMultiplier: number
+	if balance ~= nil then
+		baseCost = balance.upgradeBaseCostByMinionType[minionType] or balance.defaultUpgradeBaseCost
+		costMultiplier = balance.upgradeCostMultiplier
+	else
+		baseCost = if typeof(config.upgradeBaseCost) == "number"
+			then config.upgradeBaseCost
+			else ShopConfig.MinionEnergyUpgrades.BaseCost
+		costMultiplier = ShopConfig.MinionEnergyUpgrades.CostMultiplier
+	end
 	return getScaledCost(
 		baseCost,
-		ShopConfig.MinionEnergyUpgrades.CostMultiplier,
+		costMultiplier,
 		currentLevel,
 		ShopConfig.MinionEnergyUpgrades.MaxLevel
 	)
 end
 
-function ShopConfig.getCapacityUpgradeCost(currentLevel: number): number?
+
+function ShopConfig.getCapacityUpgradeCost(currentLevel: number, curve: CapacityUpgradeCurve?): number?
 	return getScaledCost(
-		ShopConfig.EnergyCapacityUpgrades.BaseCost,
-		ShopConfig.EnergyCapacityUpgrades.CostMultiplier,
+		if curve ~= nil then curve.baseCost else ShopConfig.EnergyCapacityUpgrades.BaseCost,
+		if curve ~= nil then curve.costMultiplier else ShopConfig.EnergyCapacityUpgrades.CostMultiplier,
 		currentLevel,
 		ShopConfig.EnergyCapacityUpgrades.MaxLevel
 	)
@@ -185,9 +233,10 @@ function ShopConfig.getMinionEnergyBonus(upgradeLevel: number, energyUpgradePerL
 	return safeLevel * safeEnergyUpgradePerLevel
 end
 
-function ShopConfig.getCapacityBonus(upgradeLevel: number): number
+function ShopConfig.getCapacityBonus(upgradeLevel: number, curve: CapacityUpgradeCurve?): number
 	local safeLevel = sanitizeLevel(upgradeLevel, ShopConfig.EnergyCapacityUpgrades.MaxLevel)
-	return safeLevel * ShopConfig.EnergyCapacityUpgrades.CapacityPerLevel
+	local capacityPerLevel = if curve ~= nil then curve.capacityPerLevel else ShopConfig.EnergyCapacityUpgrades.CapacityPerLevel
+	return safeLevel * capacityPerLevel
 end
 
 return ShopConfig

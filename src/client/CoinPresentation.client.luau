@@ -1,7 +1,7 @@
 --!strict
 
 -- Displays the authoritative Coins attribute and presents server-confirmed
--- running-distance coin awards. Purchases and save loads do not trigger popups.
+-- awards. Purchases and save loads do not trigger popups.
 
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
@@ -24,6 +24,7 @@ end
 local ATTRIBUTE = GameplayConfig.Attributes
 local PRESENTATION = ShopConfig.CoinPresentation
 local FEEDBACK = PRESENTATION.Feedback
+local RETURN_TO_SPAWN_FEEDBACK = PRESENTATION.ReturnToSpawnFeedback
 local popupRandom = Random.new()
 
 local gui = Instance.new("ScreenGui")
@@ -88,7 +89,13 @@ local function playCoinSound()
 	Debris:AddItem(sound, 5)
 end
 
-local function showCoinPopup(amount: number)
+local function showCoinPopup(amount: number, showAtCharacterHead: boolean)
+	local popupDurationSeconds = if showAtCharacterHead
+		then RETURN_TO_SPAWN_FEEDBACK.PopupDurationSeconds
+		else FEEDBACK.PopupDurationSeconds
+	local popupRiseStuds = if showAtCharacterHead
+		then RETURN_TO_SPAWN_FEEDBACK.PopupRiseStuds
+		else FEEDBACK.PopupRiseStuds
 	local character = player.Character
 	local rootPart = if character ~= nil then character:FindFirstChild("HumanoidRootPart") else nil
 	if rootPart == nil or not rootPart:IsA("BasePart") then
@@ -98,16 +105,25 @@ local function showCoinPopup(amount: number)
 	local humanoid = if character ~= nil then character:FindFirstChildOfClass("Humanoid") else nil
 	local hipHeight = if humanoid ~= nil and humanoid:IsA("Humanoid") then humanoid.HipHeight else 2
 	local feetOffset = -(rootPart.Size.Y * 0.5 + hipHeight)
+	local head = if character ~= nil then character:FindFirstChild("Head") else nil
+	local headPart = if head ~= nil and head:IsA("BasePart") then head else nil
+	local adornee = if showAtCharacterHead and headPart ~= nil then headPart else rootPart
+	local verticalOffset = feetOffset
+	if showAtCharacterHead then
+		verticalOffset = if headPart ~= nil then headPart.Size.Y * 0.5 + 0.75 else rootPart.Size.Y + hipHeight
+	end
 	local horizontalDirection = if popupRandom:NextNumber() < 0.5 then -1 else 1
-	local horizontalDrift = horizontalDirection * popupRandom:NextNumber(0.45, 1.15)
-	local riseDistance = FEEDBACK.PopupRiseStuds * popupRandom:NextNumber(0.85, 1.25)
+	local minimumDrift = if showAtCharacterHead then RETURN_TO_SPAWN_FEEDBACK.HorizontalDriftMin else 0.45
+	local maximumDrift = if showAtCharacterHead then RETURN_TO_SPAWN_FEEDBACK.HorizontalDriftMax else 1.15
+	local horizontalDrift = horizontalDirection * popupRandom:NextNumber(minimumDrift, maximumDrift)
+	local riseDistance = popupRiseStuds * popupRandom:NextNumber(0.85, 1.25)
 
 	local popup = Instance.new("BillboardGui")
 	popup.Name = "CoinPopup"
-	popup.Adornee = rootPart
+	popup.Adornee = adornee
 	popup.AlwaysOnTop = true
 	popup.Size = UDim2.fromOffset(150, 48)
-	popup.StudsOffsetWorldSpace = Vector3.new(0, feetOffset, 0)
+	popup.StudsOffsetWorldSpace = Vector3.new(0, verticalOffset, 0)
 	popup.Parent = playerGui
 
 	local popupIcon = Instance.new("ImageLabel")
@@ -134,27 +150,27 @@ local function showCoinPopup(amount: number)
 	label.TextScaled = true
 	label.Parent = popup
 
-	local popupTween = TweenService:Create(popup, TweenInfo.new(FEEDBACK.PopupDurationSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+	local popupTween = TweenService:Create(popup, TweenInfo.new(popupDurationSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 		StudsOffsetWorldSpace = popup.StudsOffsetWorldSpace + Vector3.new(horizontalDrift, riseDistance, 0),
 	})
-	local labelTween = TweenService:Create(label, TweenInfo.new(FEEDBACK.PopupDurationSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+	local labelTween = TweenService:Create(label, TweenInfo.new(popupDurationSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
 		TextTransparency = 1,
 		TextStrokeTransparency = 1,
 	})
-	local iconTween = TweenService:Create(popupIcon, TweenInfo.new(FEEDBACK.PopupDurationSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+	local iconTween = TweenService:Create(popupIcon, TweenInfo.new(popupDurationSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
 		ImageTransparency = 1,
 	})
 	popupTween:Play()
 	labelTween:Play()
 	iconTween:Play()
-	Debris:AddItem(popup, FEEDBACK.PopupDurationSeconds + 0.1)
+	Debris:AddItem(popup, popupDurationSeconds + 0.1)
 end
 
-feedbackEvent.OnClientEvent:Connect(function(coinAmount: unknown)
+feedbackEvent.OnClientEvent:Connect(function(coinAmount: unknown, showAtCharacterHead: unknown)
 	if typeof(coinAmount) ~= "number" or coinAmount <= 0 then
 		return
 	end
-	showCoinPopup(coinAmount)
+	showCoinPopup(coinAmount, showAtCharacterHead == true)
 	playCoinSound()
 end)
 

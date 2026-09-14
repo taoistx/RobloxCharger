@@ -14,6 +14,7 @@ local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 local ModifierConfig = require(Shared:WaitForChild("MinionModifierConfig"))
 local GameplayUtil = require(script.Parent:WaitForChild("GameplayUtil"))
 local MinionService = require(script.Parent:WaitForChild("MinionService"))
+local PlayerEnergyService = require(script.Parent:WaitForChild("PlayerEnergyService"))
 
 type Binding = {
 	part: BasePart,
@@ -80,6 +81,11 @@ local function onTouched(binding: Binding, touchedPart: BasePart)
 	binding.lastAttempt[player] = now
 	local before = MinionService.getFollowerCount(player)
 	local target = ModifierConfig.getTargetCount(before, definition)
+	-- A full combat-power bar consumes positive modifier gates without adding
+	-- followers. Reducing modifiers keep their normal effect while full.
+	if target > before and not PlayerEnergyService.canAddEnergy(player) then
+		target = before
+	end
 	local success, powerChange = if definition.operation == ModifierConfig.Operations.Multiply
 		then MinionService.setFollowerCountFromCurrentComposition(player, target)
 		else MinionService.setFollowerCount(player, target)
@@ -87,9 +93,10 @@ local function onTouched(binding: Binding, touchedPart: BasePart)
 		return
 	end
 	binding.used[player] = true
+	local after = MinionService.getFollowerCount(player)
 	local powerText = if powerChange >= 0 then "+" .. math.floor(powerChange) else tostring(math.ceil(powerChange))
 	player:SetAttribute(ATTRIBUTE.StatusMessage,
-		"Minions " .. ModifierConfig.getLabel(definition) .. ": " .. before .. " → " .. target
+		"Minions " .. ModifierConfig.getLabel(definition) .. ": " .. before .. " → " .. after
 			.. ", Power " .. powerText)
 end
 
@@ -171,6 +178,12 @@ local function clearPlayerHistory(player: Player)
 		binding.used[player] = nil
 		binding.lastAttempt[player] = nil
 	end
+end
+
+-- Gives a living player the same ordinary MinionModifier availability as a
+-- fresh character without disconnecting their lifecycle binding.
+function MinionModifierService.resetPlayerSession(player: Player)
+	clearPlayerHistory(player)
 end
 
 local function bindPlayer(player: Player)

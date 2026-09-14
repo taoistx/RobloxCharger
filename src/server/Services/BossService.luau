@@ -113,10 +113,13 @@ local function unbind(instance: Instance)
 	end
 end
 
-local function defeatBoss(instance: Instance, binding: Binding, player: Player)
+local function defeatBoss(instance: Instance, binding: Binding, player: Player, energyLost: number)
 	binding.defeated = true
 	instance:SetAttribute(ATTRIBUTE.Defeated, true)
-	local releasedCount = MinionService.releaseEnergyFollowers(player, binding.requiredEnergy)
+	-- Use the authoritative amount actually removed from the player's combat power.
+	-- A follower is indivisible: MinionService walks the tail of the queue until
+	-- those followers represent this entire loss.
+	local releasedCount = MinionService.releaseEnergyFollowers(player, energyLost)
 	local boundsCFrame: CFrame
 	local boundsSize: Vector3
 	if binding.root:IsA("BasePart") then
@@ -185,7 +188,7 @@ local function onBossTouched(instance: Instance, bossPart: BasePart, touchedPart
 	local currentEnergy = player:GetAttribute(ATTRIBUTE.CurrentEnergy)
 	local shouldPlayDefeatSound = typeof(currentEnergy) == "number"
 		and currentEnergy >= binding.requiredEnergy
-	if not PlayerEnergyService.spendEnergy(player, binding.requiredEnergy) then
+	if typeof(currentEnergy) ~= "number" or currentEnergy ~= currentEnergy or currentEnergy < binding.requiredEnergy then
 		player:SetAttribute(
 			ATTRIBUTE.StatusMessage,
 			"Not enough Energy (" .. math.floor(binding.requiredEnergy) .. " required). The Boss defeated you!"
@@ -193,6 +196,7 @@ local function onBossTouched(instance: Instance, bossPart: BasePart, touchedPart
 		humanoid.Health = 0
 		return
 	end
+	local energyLost = PlayerEnergyService.removeEnergy(player, binding.requiredEnergy)
 	if shouldPlayDefeatSound and defeatSoundRemote ~= nil then
 		defeatSoundRemote:FireClient(player)
 	end
@@ -202,7 +206,7 @@ local function onBossTouched(instance: Instance, bossPart: BasePart, touchedPart
 		ATTRIBUTE.BossImpactSequence,
 		(if typeof(impactSequence) == "number" then impactSequence else 0) + 1
 	)
-	defeatBoss(instance, binding, player)
+	defeatBoss(instance, binding, player, energyLost)
 	local remainingEnergy = player:GetAttribute(ATTRIBUTE.CurrentEnergy)
 	if typeof(remainingEnergy) == "number" and remainingEnergy <= 0 then
 		player:SetAttribute(ATTRIBUTE.StatusMessage, "Energy depleted: you smashed the Boss, but fell too!")
@@ -330,6 +334,16 @@ local function spawnAllBossesForCharacter(player: Player, character: Model)
 	for _, record in templates do
 		spawnTemplateForPlayer(record, player)
 	end
+end
+
+-- Rebuilds this player's per-life Boss clones without replacing the character.
+function BossService.resetPlayerSession(player: Player)
+	local character = player.Character
+	if character == nil or not character:IsDescendantOf(Workspace) then
+		clearPlayerBosses(player)
+		return
+	end
+	spawnAllBossesForCharacter(player, character)
 end
 
 local function registerTemplate(instance: Instance)

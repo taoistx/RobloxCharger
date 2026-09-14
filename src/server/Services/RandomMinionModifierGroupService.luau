@@ -148,8 +148,8 @@ local function ensureAssignment(state: PlayerState, binding: GroupBinding): Assi
 	return assignment
 end
 
-local function resetCharacterState(player: Player, state: PlayerState, character: Model?)
-	if state.character == character then
+local function resetCharacterState(player: Player, state: PlayerState, character: Model?, forceReset: boolean?)
+	if not forceReset and state.character == character then
 		return
 	end
 	state.character = character
@@ -168,6 +168,21 @@ local function resetCharacterState(player: Player, state: PlayerState, character
 			remote:FireClient(player, nil, character, false)
 		end
 	end
+end
+
+-- Re-rolls every group for a living player while retaining their character.
+-- The reset RemoteEvent restores any group the client had hidden after use.
+function RandomMinionModifierGroupService.resetPlayerSession(player: Player)
+	local state = playerStates[player]
+	if state == nil then
+		return
+	end
+	local character = player.Character
+	if character == nil or not character:IsDescendantOf(Workspace) then
+		resetCharacterState(player, state, nil, true)
+		return
+	end
+	resetCharacterState(player, state, character, true)
 end
 
 local function ensureCurrentCharacterState(player: Player): PlayerState?
@@ -229,6 +244,11 @@ local function onSlotTouched(binding: GroupBinding, slot: BasePart, touchedPart:
 	end
 	local before = MinionService.getFollowerCount(player)
 	local target = ModifierConfig.getTargetCount(before, definition)
+	-- Positive random-gate outcomes are consumed but cannot add followers at
+	-- full combat power. Negative outcomes must still remove followers.
+	if target > before and not PlayerEnergyService.canAddEnergy(player) then
+		target = before
+	end
 	local success: boolean
 	local powerChange: number
 	if definition.operation == ModifierConfig.Operations.Multiply then
@@ -241,10 +261,11 @@ local function onSlotTouched(binding: GroupBinding, slot: BasePart, touchedPart:
 	end
 
 	state.consumed[binding.model] = true
+	local after = MinionService.getFollowerCount(player)
 	local powerText = if powerChange >= 0 then "+" .. math.floor(powerChange) else tostring(math.ceil(powerChange))
 	player:SetAttribute(
 		ATTRIBUTE.StatusMessage,
-		"Minions " .. ModifierConfig.getLabel(definition) .. ": " .. before .. " → " .. target .. ", Power " .. powerText
+		"Minions " .. ModifierConfig.getLabel(definition) .. ": " .. before .. " → " .. after .. ", Power " .. powerText
 	)
 	local remote = updateRemote
 	if remote ~= nil then

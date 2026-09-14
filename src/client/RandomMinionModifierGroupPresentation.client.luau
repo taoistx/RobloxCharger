@@ -347,8 +347,8 @@ local function bind(instance: Instance)
 	requestAssignment(binding)
 end
 
-local function refreshGroupsForCharacter(character: Model)
-	if player.Character ~= character or presentedCharacter == character then
+local function refreshGroupsForCharacter(character: Model, forceRefresh: boolean?)
+	if player.Character ~= character or (not forceRefresh and presentedCharacter == character) then
 		return
 	end
 	presentedCharacter = character
@@ -367,7 +367,7 @@ updateRemote.OnClientEvent:Connect(function(groupValue: unknown, characterValue:
 	local character = characterValue :: Model
 	if groupValue == nil then
 		if consumedValue == false then
-			refreshGroupsForCharacter(character)
+			refreshGroupsForCharacter(character, true)
 		end
 		return
 	end

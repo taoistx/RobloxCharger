@@ -1,9 +1,11 @@
 --!strict
 
 --[[
-	Binds tagged treadmill Models. A model named "x15 Treadmill" grants the
-	base reward at x15 while a living player stands on its Conveyor part.
-	x3, x15, and x50 require their configured one-time Game Pass. Stepping onto
+	Binds tagged treadmill Models. The effective reward multiplier is resolved
+	from the model name through the validated experience configuration while a living
+	player stands on its Conveyor part. The original model multiplier is used
+	for its Game Pass lookup so existing scene permissions remain compatible.
+	Paid treadmills require their configured one-time Game Pass. Stepping onto
 	a locked treadmill automatically opens its native purchase prompt once per
 	visit. Occupancy, ownership, and coin grants are all validated by the server.
 
@@ -13,6 +15,8 @@
 	Optional Attributes:
 	- TreadmillEnabled: boolean, default true
 	- TreadmillGamePassId: positive integer, overrides shared config
+	Runtime Attribute: EffectiveTreadmillMultiplier: integer 0..100000;
+	0 means the global treadmill reward switch is paused.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -24,11 +28,13 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 local TreadmillConfig = require(Shared:WaitForChild("TreadmillConfig"))
+local ExperienceConfigService = require(script.Parent:WaitForChild("ExperienceConfigService"))
 local GameplayUtil = require(script.Parent:WaitForChild("GameplayUtil"))
 local PlayerShopService = require(script.Parent:WaitForChild("PlayerShopService"))
 
 type TreadmillBinding = {
 	conveyor: BasePart,
+	modelMultiplier: number,
 	multiplier: number,
 	gamePassId: number?,
 	connections: { RBXScriptConnection },
@@ -63,12 +69,12 @@ local function createRemoteEvent(name: string): RemoteEvent
 	return remote
 end
 
-local function getGamePassId(instance: Instance, multiplier: number): number?
+local function getGamePassId(instance: Instance, modelMultiplier: number): number?
 	local attributeValue = instance:GetAttribute(ATTRIBUTE.TreadmillGamePassId)
 	if typeof(attributeValue) == "number" and attributeValue == attributeValue and attributeValue > 0 then
 		return math.floor(attributeValue)
 	end
-	return TreadmillConfig.getConfiguredGamePassId(multiplier)
+	return TreadmillConfig.getConfiguredGamePassId(modelMultiplier)
 end
 
 local function isEnabled(instance: Instance): boolean
@@ -76,8 +82,20 @@ local function isEnabled(instance: Instance): boolean
 	return enabled == nil or enabled == true
 end
 
-local function isPaid(multiplier: number): boolean
-	return multiplier >= TreadmillConfig.PaidMultiplierThreshold
+local function isPaid(modelMultiplier: number): boolean
+	return modelMultiplier >= TreadmillConfig.PaidMultiplierThreshold
+end
+
+local function syncEffectiveMultiplier(instance: Instance, binding: TreadmillBinding)
+	local experienceConfig = ExperienceConfigService.getSnapshot()
+	binding.multiplier = TreadmillConfig.getEffectiveMultiplier(
+		binding.modelMultiplier,
+		experienceConfig.treadmill.multiplierRemap
+	)
+	instance:SetAttribute(
+		ATTRIBUTE.EffectiveTreadmillMultiplier,
+		if experienceConfig.features.treadmillRewardsEnabled then binding.multiplier else 0
+	)
 end
 
 local function playerOwnsPass(player: Player, gamePassId: number): boolean
@@ -177,6 +195,7 @@ local function unbind(instance: Instance)
 		return
 	end
 	bindings[instance] = nil
+	instance:SetAttribute(ATTRIBUTE.EffectiveTreadmillMultiplier, nil)
 	for _, connection in binding.connections do
 		connection:Disconnect()
 	end
@@ -196,11 +215,15 @@ local function bind(instance: Instance)
 		return
 	end
 
-	local multiplier = TreadmillConfig.parseMultiplier(instance.Name)
-	if multiplier == nil then
+	local modelMultiplier = TreadmillConfig.parseModelMultiplier(instance.Name)
+	if modelMultiplier == nil then
 		warn("[TreadmillService] model name must match x<number> Treadmill", instance)
 		return
 	end
+	local multiplier = TreadmillConfig.getEffectiveMultiplier(
+		modelMultiplier,
+		ExperienceConfigService.getSnapshot().treadmill.multiplierRemap
+	)
 	local conveyor = instance:FindFirstChild(TreadmillConfig.ConveyorPartName, true)
 	if conveyor == nil or not conveyor:IsA("BasePart") then
 		warn("[TreadmillService] treadmill requires a BasePart named Conveyor", instance)
@@ -212,8 +235,8 @@ local function bind(instance: Instance)
 		return
 	end
 
-	local gamePassId = getGamePassId(instance, multiplier)
-	if isPaid(multiplier) and gamePassId == nil then
+	local gamePassId = getGamePassId(instance, modelMultiplier)
+	if isPaid(modelMultiplier) and gamePassId == nil then
 		warn("[TreadmillService] paid treadmill has no valid Game Pass ID", instance)
 	end
 
@@ -225,11 +248,13 @@ local function bind(instance: Instance)
 
 	local binding: TreadmillBinding = {
 		conveyor = conveyor,
+		modelMultiplier = modelMultiplier,
 		multiplier = multiplier,
 		gamePassId = gamePassId,
 		connections = connections,
 	}
 	bindings[instance] = binding
+	syncEffectiveMultiplier(instance, binding)
 	table.insert(connections, instance.Destroying:Connect(function()
 		unbind(instance)
 	end))
@@ -277,7 +302,20 @@ local function getPlayersOnConveyor(conveyor: BasePart): { [Player]: boolean }
 	return playersOnConveyor
 end
 
-local function updateOccupancy(shouldAwardCoins: boolean)
+local function updateOccupancy(
+	shouldAwardCoins: boolean,
+	experienceConfig: ExperienceConfigService.Snapshot
+)
+	if not experienceConfig.features.treadmillRewardsEnabled then
+		for _, player in Players:GetPlayers() do
+			if player:GetAttribute(ATTRIBUTE.ActiveTreadmillMultiplier) ~= 0 then
+				player:SetAttribute(ATTRIBUTE.ActiveTreadmillMultiplier, 0)
+			end
+			lockedTreadmillByPlayer[player] = nil
+		end
+		return
+	end
+
 	local highestMultiplierByPlayer: { [Player]: number } = {}
 	local highestTouchedMultiplierByPlayer: { [Player]: number } = {}
 	local highestLockedBindingByPlayer: { [Player]: TreadmillBinding } = {}
@@ -291,7 +329,7 @@ local function updateOccupancy(shouldAwardCoins: boolean)
 				binding.multiplier
 			)
 			local gamePassId = binding.gamePassId
-			local canUse = not isPaid(binding.multiplier)
+			local canUse = not isPaid(binding.modelMultiplier)
 				or (gamePassId ~= nil and playerOwnsPass(player, gamePassId))
 			if canUse then
 				highestMultiplierByPlayer[player] = math.max(
@@ -324,7 +362,7 @@ local function updateOccupancy(shouldAwardCoins: boolean)
 	if not shouldAwardCoins then
 		return
 	end
-	local baseCoins = math.max(0, math.floor(TreadmillConfig.Rewards.CoinsPerAward))
+	local baseCoins = experienceConfig.treadmill.coinsPerAward
 	for player, multiplier in highestMultiplierByPlayer do
 		PlayerShopService.addCoins(player, baseCoins * multiplier)
 	end
@@ -348,6 +386,14 @@ function TreadmillService.start()
 	end
 	Players.PlayerAdded:Connect(bindPlayer)
 	Players.PlayerRemoving:Connect(unbindPlayer)
+	ExperienceConfigService.getChangedSignal():Connect(function()
+		for instance, binding in bindings do
+			syncEffectiveMultiplier(instance, binding)
+		end
+		if not ExperienceConfigService.getSnapshot().features.treadmillRewardsEnabled then
+			table.clear(lockedTreadmillByPlayer)
+		end
+	end)
 
 	MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player: Player, gamePassId: number, wasPurchased: boolean)
 		if not wasPurchased or player.Parent ~= Players then
@@ -371,16 +417,22 @@ function TreadmillService.start()
 	end)
 	task.spawn(function()
 		local checkInterval = math.max(0.05, TreadmillConfig.Rewards.OccupancyCheckIntervalSeconds)
-		local awardInterval = math.max(0.1, TreadmillConfig.Rewards.AwardIntervalSeconds)
-		local nextAwardAt = os.clock() + awardInterval
+		local appliedVersion = -1
+		local nextAwardAt = math.huge
 		while started do
 			task.wait(checkInterval)
 			local now = os.clock()
+			local experienceConfig = ExperienceConfigService.getSnapshot()
+			local awardInterval = experienceConfig.treadmill.awardIntervalSeconds
+			if experienceConfig.version ~= appliedVersion then
+				appliedVersion = experienceConfig.version
+				nextAwardAt = now + awardInterval
+			end
 			local shouldAwardCoins = now >= nextAwardAt
 			if shouldAwardCoins then
 				nextAwardAt = now + awardInterval
 			end
-			updateOccupancy(shouldAwardCoins)
+			updateOccupancy(shouldAwardCoins, experienceConfig)
 		end
 	end)
 

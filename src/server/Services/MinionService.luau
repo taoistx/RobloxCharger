@@ -238,6 +238,16 @@ local function appendFollower(player: Player, source: Instance, minionType: stri
 	})
 end
 
+-- Confirms a successful pickup with the owner before removing its server
+-- object. This is also used when energy is full: the picker is consumed and
+-- plays its normal feedback, but it must not add a follower.
+local function consumePickup(instance: Instance, player: Player, pickupId: string)
+	instance:SetAttribute(ATTRIBUTE.Collected, true)
+	getPickupFeedbackEvent():FireClient(player, pickupId)
+	CollectionService:RemoveTag(instance, TAG)
+	instance:Destroy()
+end
+
 local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 	local binding = bindings[instance]
 	if binding == nil or instance:GetAttribute(ATTRIBUTE.Collected) == true then
@@ -258,23 +268,28 @@ local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 	if (GameplayUtil.getPivot(binding.root).Position - rootPart.Position).Magnitude > PICKUP_TOUCH_DISTANCE then
 		return
 	end
-	if #getFollowers(player) >= GameplayConfig.Limits.MaxFollowersPerPlayer then
-		return
-	end
 	if not PlayerShopService.isMinionUnlocked(player, binding.minionType) then
 		player:SetAttribute(ATTRIBUTE.StatusMessage, "This minion is still locked!")
 		return
 	end
+	-- Energy capacity takes precedence over the follower-count guard. A full
+	-- player always consumes a valid owned picker, receives normal pickup
+	-- feedback, and never gains another follower.
 	if not PlayerEnergyService.canAddEnergy(player) then
-		instance:SetAttribute(ATTRIBUTE.Collected, true)
-		getPickupFeedbackEvent():FireClient(player, binding.pickupId)
-		CollectionService:RemoveTag(instance, TAG)
-		instance:Destroy()
+		consumePickup(instance, player, binding.pickupId)
 		player:SetAttribute(ATTRIBUTE.StatusMessage, "Energy is full. The minion cannot join!")
+		return
+	end
+	if #getFollowers(player) >= GameplayConfig.Limits.MaxFollowersPerPlayer then
 		return
 	end
 	local value = PlayerShopService.getMinionEnergyValue(player, binding.minionType, binding.baseValue)
 	if value == nil then
+		return
+	end
+	if value > PlayerEnergyService.getRemainingEnergyCapacity(player) then
+		consumePickup(instance, player, binding.pickupId)
+		player:SetAttribute(ATTRIBUTE.StatusMessage, "Not enough remaining Energy capacity. The minion cannot join!")
 		return
 	end
 
@@ -286,9 +301,7 @@ local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 		return
 	end
 	appendFollower(player, followerSource, binding.minionType, binding.baseValue, value)
-	getPickupFeedbackEvent():FireClient(player, binding.pickupId)
-	CollectionService:RemoveTag(instance, TAG)
-	instance:Destroy()
+	consumePickup(instance, player, binding.pickupId)
 	updateFollowerCount(player)
 
 	local gained = PlayerEnergyService.addEnergy(player, value)
@@ -379,7 +392,8 @@ end
 -- power represented by their EnergyValue. Every addition copies the existing
 -- follower with the greatest order; an empty queue falls back to a valid unlocked
 -- template. All additional sources are prepared before committing, so failure
--- changes nothing.
+-- changes nothing. Positive changes stop at the remaining combat-power capacity
+-- so every follower in the queue is represented by CurrentEnergy.
 function MinionService.setFollowerCount(player: Player, target: number): (boolean, number)
 	local playerFollowers = followers[player]
 	if playerFollowers == nil or player.Parent ~= Players or target ~= target
@@ -409,8 +423,13 @@ function MinionService.setFollowerCount(player: Player, target: number): (boolea
 				return false, 0
 			end
 		end
+		local valueToAdd = value :: number
+		local additions = math.min(
+			target - current,
+			math.floor(PlayerEnergyService.getRemainingEnergyCapacity(player) / valueToAdd)
+		)
 		local prepared: { Follower } = {}
-		for _ = 1, target - current do
+		for _ = 1, additions do
 			local source = cloneFollowerSource(template :: Instance)
 			if source == nil then
 				for _, follower in prepared do
@@ -423,7 +442,7 @@ function MinionService.setFollowerCount(player: Player, target: number): (boolea
 				instance = source,
 				minionType = minionTypeToAdd :: string,
 				baseValue = baseValue :: number,
-				value = value :: number,
+				value = valueToAdd,
 				order = 0,
 			})
 		end
@@ -449,7 +468,9 @@ end
 -- Adds followers by repeating a snapshot of the player's current queue. This is
 -- used by multiplier gates so every minion type keeps the same composition; for
 -- example, three rabbits and one dog become six rabbits and two dogs at x2.
--- Reductions and no-op targets keep the normal queue-removal behavior.
+-- Reductions and no-op targets keep the normal queue-removal behavior. When a
+-- multiplier would exceed remaining combat-power capacity, only the copies that
+-- fully fit are added.
 function MinionService.setFollowerCountFromCurrentComposition(player: Player, target: number): (boolean, number)
 	local playerFollowers = followers[player]
 	if playerFollowers == nil or player.Parent ~= Players or target ~= target
@@ -468,8 +489,12 @@ function MinionService.setFollowerCountFromCurrentComposition(player: Player, ta
 
 	local composition: { Follower } = table.clone(playerFollowers)
 	local prepared: { Follower } = table.create(target - current)
+	local remainingCapacity = PlayerEnergyService.getRemainingEnergyCapacity(player)
 	for additionIndex = 1, target - current do
 		local original = composition[((additionIndex - 1) % current) + 1]
+		if original.value > remainingCapacity then
+			continue
+		end
 		local source = cloneFollowerSource(original.instance)
 		if source == nil then
 			for _, follower in prepared do
@@ -485,6 +510,7 @@ function MinionService.setFollowerCountFromCurrentComposition(player: Player, ta
 			value = original.value,
 			order = 0,
 		})
+		remainingCapacity -= original.value
 	end
 
 	local powerChange = 0
@@ -497,20 +523,40 @@ function MinionService.setFollowerCountFromCurrentComposition(player: Player, ta
 	return true, powerChange
 end
 
+-- Knocks followers down from the visual queue's tail. FollowerOrder is the
+-- authoritative queue position; do not rely on the backing table's insertion
+-- order, because other server-side composition operations may rebuild it.
+-- Followers are indivisible, so the final knocked-down follower may make the
+-- represented combat power exceed energyToRepresent.
 function MinionService.releaseEnergyFollowers(player: Player, energyToRepresent: number): number
 	local playerFollowers = followers[player]
-	if playerFollowers == nil or energyToRepresent <= 0 then
+	if playerFollowers == nil or energyToRepresent ~= energyToRepresent or energyToRepresent <= 0 then
 		return 0
 	end
 
 	local representedEnergy = 0
-	local releasedCount = 0
-	while #playerFollowers > 0 and representedEnergy < energyToRepresent do
-		local follower = table.remove(playerFollowers, #playerFollowers)
+	local followersFromTail: { Follower } = table.clone(playerFollowers)
+	table.sort(followersFromTail, function(left: Follower, right: Follower): boolean
+		return left.order > right.order
+	end)
+
+	local followerSourcesToRelease: { [Instance]: boolean } = {}
+	for _, follower in followersFromTail do
+		if representedEnergy >= energyToRepresent then
+			break
+		end
 		representedEnergy += follower.value
-		releasedCount += 1
+		followerSourcesToRelease[follower.instance] = true
 		follower.instance:SetAttribute(ATTRIBUTE.FollowerState, FOLLOWER_STATE.Knockback)
 		scheduleSourceDestroy(follower.instance, SOURCE_DESTROY_DELAY)
+	end
+
+	local releasedCount = 0
+	for index = #playerFollowers, 1, -1 do
+		if followerSourcesToRelease[playerFollowers[index].instance] then
+			table.remove(playerFollowers, index)
+			releasedCount += 1
+		end
 	end
 	updateFollowerCount(player)
 	return releasedCount
