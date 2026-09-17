@@ -166,11 +166,11 @@ GameplayConfig.Defaults = {
 	BaseCapacity = 50,
 	-- 预留的等级容量增量配置；当前容量不再按等级增长。
 	CapacityPerLevel = 20,
-	-- 每个完整跑动距离结算段换算的战力（战力/stud）。
+	-- 已停用的兼容配置。CurrentEnergy 只表示跟随士兵的有效战力，跑动不再直接增加它。
 	EnergyPerStud = 0,
-	-- 累计多少 studs 才结算一份跑动战力，未满部分保留到下一次跑动。
+	-- 已停用的兼容配置；保留字段避免旧场景或配置读取失败。
 	DistancePerEnergyAward = 1000,
-	-- 玩家位于 GameZone 但没有有效跑动时每秒消耗的战力。
+	-- 已停用的兼容配置；战力损失必须通过整名跟随士兵结算。
 	IdleEnergyDrainPerSecond = 0,
 	-- 未单独配置士兵模板 EnergyValue 时的保留默认战力。
 	MinionEnergyValue = 10,

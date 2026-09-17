@@ -96,13 +96,13 @@ Charger/
 - `Assets/DecorateLevels5To9.luau` 仅在 Studio 编辑态执行，生成 `Workspace/PetCastleDecor/07_Levels5To9` 和 `Workspace/PetCastleDecor/TracksideDecor/07_Levels5To9`；赛道两旁装饰统一放入 `TracksideDecor`，不得将此脚本作为运行时 Script 安装。
 - 新增、删除或移动上述主要模块和目录时，应同步更新本节。
 
-### 跑动能量结算
+### 战力与士兵队列
 
-- `GameplayConfig.Defaults.EnergyPerStud` 定义每 stud 跑动距离对应的能量。
-- `GameplayConfig.Defaults.DistancePerEnergyAward` 定义一次能量结算所需累计的跑动距离（studs）。
-- `PlayerEnergyService` 只累计玩家位于 `GameZone` 内的有效跑动距离；累计距离达到结算间隔后，按 `结算份数 × DistancePerEnergyAward × EnergyPerStud` 增加能量。
-- 一次移动跨过多个结算间隔时必须结算全部完整份数，未满一个间隔的距离应保留到后续跑动，角色重建时清零。
-- 跑动能量仍由服务端权威计算；客户端不得提交距离或决定结算结果。
+- `CurrentEnergy` 是当前跟随士兵有效战力的总和，由 `MinionService` 统一同步；不得作为独立资源直接奖励或扣除。
+- 新士兵的有效战力为 `min(该次招募标准战力, 剩余容量)`；有非零余量时允许最后一名士兵以部分战力入队并填满容量。
+- Boss 与 Trap 从队尾按整名士兵结算，实际损失可因最后一名士兵超过标注需求；士兵全部离队后 `CurrentEnergy` 必须为 `0`。
+- `EnergyPerStud`、`DistancePerEnergyAward` 和 `IdleEnergyDrainPerSecond` 仅保留旧配置兼容性，当前不得写入或消耗 `CurrentEnergy`。跑动仍由服务端权威计入 Coins。
+- 士兵战力在入队时锁定；商店能量升级仅影响之后通过拾取或数量门加入的士兵。
 
 ### 玩家重生与出生保护
 

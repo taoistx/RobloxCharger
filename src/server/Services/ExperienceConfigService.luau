@@ -67,6 +67,8 @@ local MIN_COST_MULTIPLIER = 1
 local MAX_COST_MULTIPLIER = 10
 local MIN_TREADMILL_INTERVAL = 0.1
 local MAX_TREADMILL_INTERVAL = 3600
+local INITIAL_LOAD_RETRY_SECONDS = 5
+local MAX_INITIAL_LOAD_RETRY_SECONDS = 60
 
 local changedEvent = Instance.new("BindableEvent")
 changedEvent.Name = "ExperienceConfigChanged"
@@ -482,27 +484,41 @@ local function refreshFromSource()
 	refreshing = false
 end
 
+local function loadInitialSnapshot()
+	local retrySeconds = INITIAL_LOAD_RETRY_SECONDS
+	while sourceSnapshot == nil do
+		local success, snapshotOrError = pcall(function()
+			return ConfigService:GetConfigAsync()
+		end)
+		if success then
+			local snapshot = snapshotOrError :: ConfigSnapshot
+			sourceSnapshot = snapshot
+			snapshot.UpdateAvailable:Connect(function()
+				task.spawn(refreshFromSource)
+			end)
+			publishSnapshot(buildSnapshot(snapshot, currentSnapshot.version + 1))
+			print("[ExperienceConfigService] remote configuration synchronized")
+			return
+		end
+
+		warn(
+			"[ExperienceConfigService] initial configuration load failed; using local defaults and retrying in "
+				.. retrySeconds
+				.. " seconds: "
+				.. tostring(snapshotOrError)
+		)
+		task.wait(retrySeconds)
+		retrySeconds = math.min(retrySeconds * 2, MAX_INITIAL_LOAD_RETRY_SECONDS)
+	end
+end
+
 function ExperienceConfigService.start()
 	if started then
 		return
 	end
 	started = true
-
-	local success, snapshotOrError = pcall(function()
-		return ConfigService:GetConfigAsync()
-	end)
-	if not success then
-		warn("[ExperienceConfigService] initial configuration load failed; using local defaults: " .. tostring(snapshotOrError))
-		return
-	end
-
-	local snapshot = snapshotOrError :: ConfigSnapshot
-	sourceSnapshot = snapshot
-	publishSnapshot(buildSnapshot(snapshot, currentSnapshot.version + 1))
-	snapshot.UpdateAvailable:Connect(function()
-		task.spawn(refreshFromSource)
-	end)
-	print("[ExperienceConfigService] started")
+	task.defer(loadInitialSnapshot)
+	print("[ExperienceConfigService] started with local defaults; synchronizing remote configuration in background")
 end
 
 function ExperienceConfigService.getSnapshot(): Snapshot

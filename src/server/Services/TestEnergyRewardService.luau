@@ -5,8 +5,9 @@
 	TestEnergyReward tag: BasePart only.
 	Required attributes: none.
 	Optional attributes: none.
-	The generated part awards its touching player 5,000 current energy and sets
-	their session-only energy capacity to 5,000. It never creates followers.
+	The generated part sets the touching player's session-only energy capacity to
+	5,000. It deliberately never grants CurrentEnergy because combat power must
+	always be represented by active followers.
 ]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -16,7 +17,6 @@ local Workspace = game:GetService("Workspace")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 local GameplayUtil = require(script.Parent:WaitForChild("GameplayUtil"))
-local PlayerEnergyService = require(script.Parent:WaitForChild("PlayerEnergyService"))
 
 type Binding = {
 	connections: { RBXScriptConnection },
@@ -75,7 +75,7 @@ local function createDefaultPart()
 	label.Size = UDim2.fromScale(1, 1)
 	label.BackgroundTransparency = 1
 	label.Font = Enum.Font.GothamBlack
-	label.Text = "TEST: +5000 ENERGY / CAPACITY"
+	label.Text = "TEST: 5000 CAPACITY"
 	label.TextColor3 = Color3.fromRGB(255, 245, 157)
 	label.TextScaled = true
 	label.TextStrokeTransparency = 0.45
@@ -113,10 +113,10 @@ local function awardPlayer(part: BasePart, touchedPart: BasePart)
 	end
 	binding.lastAwardAt[player] = now
 
-	-- This is deliberately independent of MinionService: no follower is added or removed.
+	-- This remains independent of MinionService: it changes only capacity, never
+	-- grants follower-less combat power.
 	player:SetAttribute(ATTRIBUTE.EnergyCapacity, REWARD_AMOUNT)
-	PlayerEnergyService.setEnergy(player, REWARD_AMOUNT)
-	player:SetAttribute(ATTRIBUTE.StatusMessage, "Test reward: Energy and capacity set to 5000 (no minions added).")
+	player:SetAttribute(ATTRIBUTE.StatusMessage, "Test reward: capacity set to 5000. Recruit minions to gain Energy.")
 end
 
 local function bind(instance: Instance)
@@ -166,7 +166,7 @@ function TestEnergyRewardService.start()
 	end)
 
 	createDefaultPart()
-	print("[TestEnergyRewardService] created independent +5000 energy test Part")
+	print("[TestEnergyRewardService] created 5000-capacity test Part")
 end
 
 return TestEnergyRewardService

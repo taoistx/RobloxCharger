@@ -24,7 +24,6 @@ type PlayerState = {
 	humanoid: Humanoid?,
 	rootPart: BasePart?,
 	lastPosition: Vector3?,
-	distanceUntilEnergyAward: number,
 	playerConnections: { RBXScriptConnection },
 	characterConnections: { RBXScriptConnection },
 }
@@ -36,7 +35,7 @@ local ATTRIBUTE = GameplayConfig.Attributes
 
 -- GameZone 垂直方向额外允许角色根部超出包围盒的距离（stud）。
 local ZONE_VERTICAL_TOLERANCE = 8
--- 单帧最多计入能量和 Coins 的移动速度（stud/秒），用于过滤瞬移。
+-- 单帧最多计入 Coins 的移动速度（stud/秒），用于过滤瞬移。
 local MAX_DISTANCE_PER_FRAME_SPEED = 32
 -- 单帧实际移动距离必须超过该值才计入跑动结算（stud）。
 local MIN_MOVEMENT_DISTANCE = 0.01
@@ -118,7 +117,6 @@ local function clearCharacterState(state: PlayerState)
 	state.humanoid = nil
 	state.rootPart = nil
 	state.lastPosition = nil
-	state.distanceUntilEnergyAward = GameplayConfig.Defaults.DistancePerEnergyAward
 end
 
 local function onCharacterAdded(player: Player, character: Model)
@@ -139,7 +137,6 @@ local function onCharacterAdded(player: Player, character: Model)
 	state.humanoid = humanoid
 	state.rootPart = rootPart
 	state.lastPosition = rootPart.Position
-	state.distanceUntilEnergyAward = GameplayConfig.Defaults.DistancePerEnergyAward
 	PlayerEnergyService.setEnergy(player, 0)
 	player:SetAttribute(ATTRIBUTE.IsInGameZone, false)
 	player:SetAttribute(ATTRIBUTE.CurrentGameZoneIndex, nil)
@@ -161,7 +158,6 @@ local function bindPlayer(player: Player)
 		humanoid = nil,
 		rootPart = nil,
 		lastPosition = nil,
-		distanceUntilEnergyAward = GameplayConfig.Defaults.DistancePerEnergyAward,
 		playerConnections = {},
 		characterConnections = {},
 	}
@@ -227,7 +223,6 @@ function PlayerEnergyService.resetPlayerSession(player: Player)
 	local state = states[player]
 	if state ~= nil then
 		state.lastPosition = if state.rootPart ~= nil then state.rootPart.Position else nil
-		state.distanceUntilEnergyAward = GameplayConfig.Defaults.DistancePerEnergyAward
 	end
 	PlayerEnergyService.setEnergy(player, 0)
 	player:SetAttribute(ATTRIBUTE.IsInGameZone, false)
@@ -235,61 +230,19 @@ function PlayerEnergyService.resetPlayerSession(player: Player)
 	player:SetAttribute(ATTRIBUTE.BossImpactSequence, 0)
 end
 
-function PlayerEnergyService.addEnergy(player: Player, value: number): number
-	if value <= 0 then
-		return 0
-	end
-	local before = getEnergy(player)
-	PlayerEnergyService.setEnergy(player, before + value)
-	return getEnergy(player) - before
-end
-
 function PlayerEnergyService.canAddEnergy(player: Player): boolean
 	return getEnergy(player) < getCapacity(player)
 end
 
 -- Returns the combat-power budget that can still be represented by followers.
--- Callers that create a follower must reserve its entire EnergyValue before
--- adding its visual source; addEnergy intentionally clamps generic rewards.
+-- Callers creating a follower reserve from this budget before adding its visual
+-- source; the final follower may use only the remaining partial amount.
 function PlayerEnergyService.getRemainingEnergyCapacity(player: Player): number
 	return math.max(0, getCapacity(player) - getEnergy(player))
 end
 
-function PlayerEnergyService.removeEnergy(player: Player, value: number): number
-	if value <= 0 then
-		return 0
-	end
-	local before = getEnergy(player)
-	PlayerEnergyService.setEnergy(player, before - value)
-	return before - getEnergy(player)
-end
-
-function PlayerEnergyService.spendEnergy(player: Player, value: number): boolean
-	if value <= 0 then
-		return true
-	end
-	local energy = getEnergy(player)
-	if energy < value then
-		return false
-	end
-	PlayerEnergyService.setEnergy(player, energy - value)
-	return true
-end
-
 function PlayerEnergyService.isPlayerInGameZone(player: Player): boolean
 	return player:GetAttribute(ATTRIBUTE.IsInGameZone) == true
-end
-
-local function awardEnergyForRunningDistance(player: Player, state: PlayerState, distance: number)
-	local distancePerAward = math.max(0.001, GameplayConfig.Defaults.DistancePerEnergyAward)
-	state.distanceUntilEnergyAward -= distance
-	if state.distanceUntilEnergyAward > 0 then
-		return
-	end
-
-	local awardCount = 1 + math.floor(-state.distanceUntilEnergyAward / distancePerAward)
-	state.distanceUntilEnergyAward += awardCount * distancePerAward
-	PlayerEnergyService.addEnergy(player, awardCount * distancePerAward * GameplayConfig.Defaults.EnergyPerStud)
 end
 
 function PlayerEnergyService.start()
@@ -336,13 +289,13 @@ function PlayerEnergyService.start()
 			end
 
 			local distance = math.min((position - previousPosition).Magnitude, MAX_DISTANCE_PER_FRAME_SPEED * deltaTime)
-			-- 奖励以服务端观测到的角色实际位移为准。强制前进、传送带等
+			-- Coins 奖励以服务端观测到的角色实际位移为准。强制前进、传送带等
 			-- 运动不会写入 Humanoid.MoveDirection，因此不能把按键输入作为条件。
 			if distance > MIN_MOVEMENT_DISTANCE then
-				awardEnergyForRunningDistance(player, state, distance)
+				-- CurrentEnergy is squad combat power and must only be created by
+				-- MinionService. Running remains available for Coins progression,
+				-- but can no longer create follower-less combat power.
 				PlayerShopService.addRunningDistance(player, distance)
-			else
-				PlayerEnergyService.spendEnergy(player, GameplayConfig.Defaults.IdleEnergyDrainPerSecond * deltaTime)
 			end
 		end
 	end)

@@ -28,7 +28,6 @@ local DemoArenaService = require(script.Parent.Services:WaitForChild("DemoArenaS
 
 Players.RespawnTime = GameplayConfig.Defaults.PlayerRespawnSeconds
 
-ExperienceConfigService.start()
 TutorialService.start()
 PlayerShopService.start()
 PlayerProgressionService.start()
@@ -47,6 +46,7 @@ ReturnToSpawnService.start()
 BossService.start()
 TreadmillService.start()
 FinalZoneService.start()
+ExperienceConfigService.start()
 DemoArenaService.buildIfNeeded()
 
 print("[GameplayBootstrap] gameplay services started")

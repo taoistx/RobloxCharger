@@ -189,6 +189,28 @@ local function updateFollowerCount(player: Player)
 	player:SetAttribute(ATTRIBUTE.FollowerCount, if playerFollowers ~= nil then #playerFollowers else 0)
 end
 
+-- CurrentEnergy is the displayed combat power of the active squad, never an
+-- independent resource. Keeping this write next to the authoritative follower
+-- table prevents knocked-away visuals and the HUD from drifting apart.
+local function syncCombatPower(player: Player): number
+	local total = 0
+	local playerFollowers = followers[player]
+	if playerFollowers ~= nil then
+		for _, follower in playerFollowers do
+			total += follower.value
+		end
+	end
+	PlayerEnergyService.setEnergy(player, total)
+	return total
+end
+
+local function getAllocatableFollowerValue(player: Player, standardValue: number): number
+	if standardValue <= 0 then
+		return 0
+	end
+	return math.min(standardValue, PlayerEnergyService.getRemainingEnergyCapacity(player))
+end
+
 local function prepareVisualSource(root: RootObject)
 	for _, part in GameplayUtil.getParts(root) do
 		part.Anchored = true
@@ -287,9 +309,13 @@ local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 	if value == nil then
 		return
 	end
-	if value > PlayerEnergyService.getRemainingEnergyCapacity(player) then
+	-- The final follower can contribute only the remaining capacity. It still
+	-- joins the formation, so a positive pickup never appears to do nothing just
+	-- because its standard power would overfill the bar.
+	value = getAllocatableFollowerValue(player, value)
+	if value <= 0 then
 		consumePickup(instance, player, binding.pickupId)
-		player:SetAttribute(ATTRIBUTE.StatusMessage, "Not enough remaining Energy capacity. The minion cannot join!")
+		player:SetAttribute(ATTRIBUTE.StatusMessage, "Energy is full. The minion cannot join!")
 		return
 	end
 
@@ -303,9 +329,8 @@ local function onPickupTouched(instance: Instance, touchedPart: BasePart)
 	appendFollower(player, followerSource, binding.minionType, binding.baseValue, value)
 	consumePickup(instance, player, binding.pickupId)
 	updateFollowerCount(player)
-
-	local gained = PlayerEnergyService.addEnergy(player, value)
-	player:SetAttribute(ATTRIBUTE.StatusMessage, "+" .. math.floor(gained) .. " Energy. Minion joined!")
+	syncCombatPower(player)
+	player:SetAttribute(ATTRIBUTE.StatusMessage, "+" .. math.floor(value) .. " Energy. Minion joined!")
 end
 
 local function bind(instance: Instance)
@@ -358,42 +383,12 @@ function MinionService.getFollowerCount(player: Player): number
 	return if playerFollowers ~= nil then #playerFollowers else 0
 end
 
-function MinionService.refreshFollowerEnergyValues(player: Player)
-	local playerFollowers = followers[player]
-	if playerFollowers == nil then
-		return
-	end
-
-	local powerChange = 0
-	for index = #playerFollowers, 1, -1 do
-		local follower = playerFollowers[index]
-		if not PlayerShopService.isMinionUnlocked(player, follower.minionType) then
-			powerChange -= follower.value
-			table.remove(playerFollowers, index)
-			follower.instance:SetAttribute(ATTRIBUTE.FollowerState, FOLLOWER_STATE.Removed)
-			scheduleSourceDestroy(follower.instance, 0.15)
-		else
-			local value = PlayerShopService.getMinionEnergyValue(player, follower.minionType, follower.baseValue)
-			if value ~= nil and value ~= follower.value then
-				powerChange += value - follower.value
-				follower.value = value
-			end
-		end
-	end
-	updateFollowerCount(player)
-	if powerChange > 0 then
-		PlayerEnergyService.addEnergy(player, powerChange)
-	elseif powerChange < 0 then
-		PlayerEnergyService.removeEnergy(player, -powerChange)
-	end
-end
-
 -- Server-only count changes. Added/removed followers also add/remove the combat
 -- power represented by their EnergyValue. Every addition copies the existing
 -- follower with the greatest order; an empty queue falls back to a valid unlocked
--- template. All additional sources are prepared before committing, so failure
--- changes nothing. Positive changes stop at the remaining combat-power capacity
--- so every follower in the queue is represented by CurrentEnergy.
+-- template. A minion's power is fixed when it joins; shop upgrades affect later
+-- recruits only. Positive changes use any non-zero capacity remainder for one
+-- final partial-power follower.
 function MinionService.setFollowerCount(player: Player, target: number): (boolean, number)
 	local playerFollowers = followers[player]
 	if playerFollowers == nil or player.Parent ~= Players or target ~= target
@@ -413,7 +408,10 @@ function MinionService.setFollowerCount(player: Player, target: number): (boolea
 			template = lastFollower.instance
 			minionTypeToAdd = lastFollower.minionType
 			baseValue = lastFollower.baseValue
-			value = lastFollower.value
+			value = PlayerShopService.getMinionEnergyValue(player, lastFollower.minionType, lastFollower.baseValue)
+			if value == nil then
+				return false, 0
+			end
 		else
 			template, minionTypeToAdd, baseValue = getDefaultMinionTemplate(player)
 			if template ~= nil and minionTypeToAdd ~= nil and baseValue ~= nil then
@@ -423,13 +421,14 @@ function MinionService.setFollowerCount(player: Player, target: number): (boolea
 				return false, 0
 			end
 		end
-		local valueToAdd = value :: number
-		local additions = math.min(
-			target - current,
-			math.floor(PlayerEnergyService.getRemainingEnergyCapacity(player) / valueToAdd)
-		)
+		local standardValue = value :: number
 		local prepared: { Follower } = {}
-		for _ = 1, additions do
+		local remainingCapacity = PlayerEnergyService.getRemainingEnergyCapacity(player)
+		for _ = 1, target - current do
+			local valueToAdd = math.min(standardValue, remainingCapacity)
+			if valueToAdd <= 0 then
+				break
+			end
 			local source = cloneFollowerSource(template :: Instance)
 			if source == nil then
 				for _, follower in prepared do
@@ -445,12 +444,13 @@ function MinionService.setFollowerCount(player: Player, target: number): (boolea
 				value = valueToAdd,
 				order = 0,
 			})
+			remainingCapacity -= valueToAdd
 		end
 		for _, follower in prepared do
 			appendFollower(player, follower.instance, follower.minionType, follower.baseValue, follower.value)
 			powerChange += follower.value
 		end
-		powerChange = PlayerEnergyService.addEnergy(player, powerChange)
+		syncCombatPower(player)
 	else
 		local removedPower = 0
 		while #playerFollowers > target do
@@ -459,7 +459,8 @@ function MinionService.setFollowerCount(player: Player, target: number): (boolea
 			follower.instance:SetAttribute(ATTRIBUTE.FollowerState, FOLLOWER_STATE.Knockback)
 			scheduleSourceDestroy(follower.instance, SOURCE_DESTROY_DELAY)
 		end
-		powerChange = -PlayerEnergyService.removeEnergy(player, removedPower)
+		powerChange = -removedPower
+		syncCombatPower(player)
 	end
 	updateFollowerCount(player)
 	return true, powerChange
@@ -468,9 +469,8 @@ end
 -- Adds followers by repeating a snapshot of the player's current queue. This is
 -- used by multiplier gates so every minion type keeps the same composition; for
 -- example, three rabbits and one dog become six rabbits and two dogs at x2.
--- Reductions and no-op targets keep the normal queue-removal behavior. When a
--- multiplier would exceed remaining combat-power capacity, only the copies that
--- fully fit are added.
+-- Each newly copied type receives its current shop value, then the last copy can
+-- use a remaining partial-power slot. Reductions keep normal queue removal.
 function MinionService.setFollowerCountFromCurrentComposition(player: Player, target: number): (boolean, number)
 	local playerFollowers = followers[player]
 	if playerFollowers == nil or player.Parent ~= Players or target ~= target
@@ -492,8 +492,16 @@ function MinionService.setFollowerCountFromCurrentComposition(player: Player, ta
 	local remainingCapacity = PlayerEnergyService.getRemainingEnergyCapacity(player)
 	for additionIndex = 1, target - current do
 		local original = composition[((additionIndex - 1) % current) + 1]
-		if original.value > remainingCapacity then
-			continue
+		local standardValue = PlayerShopService.getMinionEnergyValue(player, original.minionType, original.baseValue)
+		if standardValue == nil then
+			for _, follower in prepared do
+				follower.instance:Destroy()
+			end
+			return false, 0
+		end
+		local valueToAdd = math.min(standardValue, remainingCapacity)
+		if valueToAdd <= 0 then
+			break
 		end
 		local source = cloneFollowerSource(original.instance)
 		if source == nil then
@@ -507,10 +515,10 @@ function MinionService.setFollowerCountFromCurrentComposition(player: Player, ta
 			instance = source,
 			minionType = original.minionType,
 			baseValue = original.baseValue,
-			value = original.value,
+			value = valueToAdd,
 			order = 0,
 		})
-		remainingCapacity -= original.value
+		remainingCapacity -= valueToAdd
 	end
 
 	local powerChange = 0
@@ -518,23 +526,22 @@ function MinionService.setFollowerCountFromCurrentComposition(player: Player, ta
 		appendFollower(player, follower.instance, follower.minionType, follower.baseValue, follower.value)
 		powerChange += follower.value
 	end
-	powerChange = PlayerEnergyService.addEnergy(player, powerChange)
+	syncCombatPower(player)
 	updateFollowerCount(player)
 	return true, powerChange
 end
 
--- Knocks followers down from the visual queue's tail. FollowerOrder is the
--- authoritative queue position; do not rely on the backing table's insertion
--- order, because other server-side composition operations may rebuild it.
--- Followers are indivisible, so the final knocked-down follower may make the
--- represented combat power exceed energyToRepresent.
-function MinionService.releaseEnergyFollowers(player: Player, energyToRepresent: number): number
+-- Releases followers from the visual queue's tail until their effective combat
+-- power covers targetPower. Followers are indivisible, so actualPower can exceed
+-- targetPower by the last follower's value. The returned power is authoritative
+-- for Boss and Trap feedback and CurrentEnergy is immediately resynchronized.
+function MinionService.releaseFollowersForPower(player: Player, targetPower: number): (number, number)
 	local playerFollowers = followers[player]
-	if playerFollowers == nil or energyToRepresent ~= energyToRepresent or energyToRepresent <= 0 then
-		return 0
+	if playerFollowers == nil or targetPower ~= targetPower or targetPower <= 0 then
+		return 0, 0
 	end
 
-	local representedEnergy = 0
+	local actualPower = 0
 	local followersFromTail: { Follower } = table.clone(playerFollowers)
 	table.sort(followersFromTail, function(left: Follower, right: Follower): boolean
 		return left.order > right.order
@@ -542,10 +549,10 @@ function MinionService.releaseEnergyFollowers(player: Player, energyToRepresent:
 
 	local followerSourcesToRelease: { [Instance]: boolean } = {}
 	for _, follower in followersFromTail do
-		if representedEnergy >= energyToRepresent then
+		if actualPower >= targetPower then
 			break
 		end
-		representedEnergy += follower.value
+		actualPower += follower.value
 		followerSourcesToRelease[follower.instance] = true
 		follower.instance:SetAttribute(ATTRIBUTE.FollowerState, FOLLOWER_STATE.Knockback)
 		scheduleSourceDestroy(follower.instance, SOURCE_DESTROY_DELAY)
@@ -559,13 +566,15 @@ function MinionService.releaseEnergyFollowers(player: Player, energyToRepresent:
 		end
 	end
 	updateFollowerCount(player)
-	return releasedCount
+	syncCombatPower(player)
+	return actualPower, releasedCount
 end
 
 function MinionService.releaseAllFollowers(player: Player)
 	local playerFollowers = followers[player]
 	if playerFollowers == nil then
 		updateFollowerCount(player)
+		syncCombatPower(player)
 		return
 	end
 
@@ -575,6 +584,7 @@ function MinionService.releaseAllFollowers(player: Player)
 		scheduleSourceDestroy(follower.instance, 0.15)
 	end
 	updateFollowerCount(player)
+	syncCombatPower(player)
 end
 
 local function bindCharacterDeath(player: Player, character: Model)
@@ -602,6 +612,7 @@ local function bindPlayer(player: Player)
 	followers[player] = {}
 	nextFollowerOrders[player] = 0
 	updateFollowerCount(player)
+	syncCombatPower(player)
 
 	local connectionState: PlayerConnectionState = { connections = {}, characterDiedConnection = nil }
 	playerConnections[player] = connectionState
@@ -610,9 +621,6 @@ local function bindPlayer(player: Player)
 	end))
 	table.insert(connectionState.connections, player.CharacterAdded:Connect(function(character)
 		bindCharacterDeath(player, character)
-	end))
-	table.insert(connectionState.connections, player:GetAttributeChangedSignal(ATTRIBUTE.ShopRevision):Connect(function()
-		MinionService.refreshFollowerEnergyValues(player)
 	end))
 	if player.Character ~= nil then
 		bindCharacterDeath(player, player.Character)

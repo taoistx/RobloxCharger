@@ -323,13 +323,13 @@ local function createMinionCard(parent: Instance, minion: any, cardIndex: number
 		local energyUpgradePerLevel = math.floor(minion.energyUpgradePerLevel or 0)
 		local nextEnergy = math.min(currentEnergy + energyUpgradePerLevel, GameplayConfig.Limits.MaxEnergyValue)
 		detailText = string.format(
-			"Unlocked  •  Energy %d → %d  •  Level %d",
+			"Unlocked  •  New recruits Energy %d → %d  •  Level %d",
 			currentEnergy,
 			nextEnergy,
 			math.floor(minion.upgradeLevel or 0)
 		)
 	elseif unlocked then
-		detailText = string.format("Unlocked  •  Energy %d  •  MAX LEVEL", currentEnergy)
+		detailText = string.format("Unlocked  •  New recruits Energy %d  •  MAX LEVEL", currentEnergy)
 	else
 		detailText = string.format("Locked  •  Base Energy %d", math.floor(minion.baseEnergy or 0))
 	end

@@ -22,7 +22,6 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 local GameplayUtil = require(script.Parent:WaitForChild("GameplayUtil"))
-local PlayerEnergyService = require(script.Parent:WaitForChild("PlayerEnergyService"))
 local MinionService = require(script.Parent:WaitForChild("MinionService"))
 
 type RootObject = GameplayUtil.RootObject
@@ -113,13 +112,12 @@ local function unbind(instance: Instance)
 	end
 end
 
-local function defeatBoss(instance: Instance, binding: Binding, player: Player, energyLost: number)
+local function defeatBoss(instance: Instance, binding: Binding, player: Player): (number, number)
 	binding.defeated = true
 	instance:SetAttribute(ATTRIBUTE.Defeated, true)
-	-- Use the authoritative amount actually removed from the player's combat power.
-	-- A follower is indivisible: MinionService walks the tail of the queue until
-	-- those followers represent this entire loss.
-	local releasedCount = MinionService.releaseEnergyFollowers(player, energyLost)
+	-- Followers are indivisible. Release the tail first, then use the actual
+	-- represented power as the loss so the squad and CurrentEnergy stay aligned.
+	local actualPowerLost, releasedCount = MinionService.releaseFollowersForPower(player, binding.requiredEnergy)
 	local boundsCFrame: CFrame
 	local boundsSize: Vector3
 	if binding.root:IsA("BasePart") then
@@ -134,13 +132,16 @@ local function defeatBoss(instance: Instance, binding: Binding, player: Player, 
 	end
 	player:SetAttribute(
 		ATTRIBUTE.StatusMessage,
-		"Boss defeated! Spent "
+		"Boss defeated! Required "
 			.. math.floor(binding.requiredEnergy)
-			.. " Energy. "
+			.. " Energy; actually spent "
+			.. math.floor(actualPowerLost)
+			.. ". "
 			.. releasedCount
 			.. " minions were knocked away."
 	)
 	instance:Destroy()
+	return actualPowerLost, releasedCount
 end
 
 local function distanceToPartBounds(part: BasePart, worldPosition: Vector3): number
@@ -196,7 +197,6 @@ local function onBossTouched(instance: Instance, bossPart: BasePart, touchedPart
 		humanoid.Health = 0
 		return
 	end
-	local energyLost = PlayerEnergyService.removeEnergy(player, binding.requiredEnergy)
 	if shouldPlayDefeatSound and defeatSoundRemote ~= nil then
 		defeatSoundRemote:FireClient(player)
 	end
@@ -206,10 +206,19 @@ local function onBossTouched(instance: Instance, bossPart: BasePart, touchedPart
 		ATTRIBUTE.BossImpactSequence,
 		(if typeof(impactSequence) == "number" then impactSequence else 0) + 1
 	)
-	defeatBoss(instance, binding, player, energyLost)
+	local actualPowerLost, releasedCount = defeatBoss(instance, binding, player)
 	local remainingEnergy = player:GetAttribute(ATTRIBUTE.CurrentEnergy)
 	if typeof(remainingEnergy) == "number" and remainingEnergy <= 0 then
-		player:SetAttribute(ATTRIBUTE.StatusMessage, "Energy depleted: you smashed the Boss, but fell too!")
+		player:SetAttribute(
+			ATTRIBUTE.StatusMessage,
+			"Boss defeated! Required "
+				.. math.floor(binding.requiredEnergy)
+				.. " Energy; actually spent "
+				.. math.floor(actualPowerLost)
+				.. ". "
+				.. releasedCount
+				.. " minions were knocked away. Energy depleted: you fell too!"
+		)
 		humanoid.Health = 0
 	end
 end

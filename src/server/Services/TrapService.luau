@@ -19,7 +19,6 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 local GameplayUtil = require(script.Parent:WaitForChild("GameplayUtil"))
 local MinionService = require(script.Parent:WaitForChild("MinionService"))
-local PlayerEnergyService = require(script.Parent:WaitForChild("PlayerEnergyService"))
 
 export type Impact = {
 	position: Vector3?,
@@ -127,12 +126,11 @@ function TrapService.tryTrigger(instance: Instance, player: Player, impact: Impa
 		applyImpact(rootPart, impact)
 	end
 
-	local removed = PlayerEnergyService.removeEnergy(player, damage)
-	if removed > 0 then
-		local releasedCount = MinionService.releaseEnergyFollowers(player, removed)
+	local actualPowerLost, releasedCount = MinionService.releaseFollowersForPower(player, damage)
+	if actualPowerLost > 0 then
 		player:SetAttribute(
 			ATTRIBUTE.StatusMessage,
-			"Trap hit! Lost " .. math.floor(removed) .. " Energy; " .. releasedCount .. " minions were knocked away!"
+			"Trap hit! Lost " .. math.floor(actualPowerLost) .. " Energy; " .. releasedCount .. " minions were knocked away!"
 		)
 	else
 		player:SetAttribute(ATTRIBUTE.StatusMessage, "Trap hit, but you have no Energy to lose.")

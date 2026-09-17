@@ -740,10 +740,13 @@ local function onPurchaseRequested(player: Player, actionValue: unknown, minionT
 		state.minionEnergyUpgradeLevels[minionType] = level + 1
 		markDirty(state)
 		syncAttributes(player, state)
-		player:SetAttribute(ATTRIBUTE.StatusMessage, ShopConfig.getMinionDisplayName(minionType) .. " energy upgraded!")
+		player:SetAttribute(
+			ATTRIBUTE.StatusMessage,
+			ShopConfig.getMinionDisplayName(minionType) .. " energy upgraded for future recruits!"
+		)
 		notifyPlayer(player)
 		task.spawn(savePlayer, player)
-		return makeResponse(player, true, "Minion energy upgraded!")
+		return makeResponse(player, true, "Future recruits will use the upgraded minion energy.")
 	end
 
 	return makeResponse(player, false, "Invalid purchase action.")
@@ -857,21 +860,9 @@ function PlayerShopService.tryUpgradeEnergyCapacity(player: Player): (boolean, s
 		return false, message
 	end
 
-	local energyBeforeUpgrade = player:GetAttribute(ATTRIBUTE.CurrentEnergy)
-	local preservedEnergy = if typeof(energyBeforeUpgrade) == "number" and energyBeforeUpgrade == energyBeforeUpgrade
-		then math.max(0, energyBeforeUpgrade)
-		else 0
 	state.capacityUpgradeLevel = level + 1
 	markDirty(state)
 	syncAttributes(player, state)
-	-- Capacity attribute listeners normally preserve energy as well. Writing the
-	-- snapshot explicitly closes ordering gaps and guarantees an upgrade never
-	-- grants current energy. Invalid over-cap values are clamped to the old/new cap.
-	local capacity = player:GetAttribute(ATTRIBUTE.EnergyCapacity)
-	if typeof(capacity) == "number" and capacity == capacity and capacity > 0 then
-		preservedEnergy = math.min(preservedEnergy, capacity)
-	end
-	player:SetAttribute(ATTRIBUTE.CurrentEnergy, preservedEnergy)
 	local message = "Spent " .. cost .. " Coins. Energy capacity upgraded!"
 	player:SetAttribute(ATTRIBUTE.StatusMessage, message)
 	notifyPlayer(player)

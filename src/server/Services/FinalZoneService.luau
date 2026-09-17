@@ -21,7 +21,6 @@ local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameplayConfig = require(Shared:WaitForChild("GameplayConfig"))
 local GameplayUtil = require(script.Parent:WaitForChild("GameplayUtil"))
 local MinionService = require(script.Parent:WaitForChild("MinionService"))
-local PlayerEnergyService = require(script.Parent:WaitForChild("PlayerEnergyService"))
 
 type Binding = {
 	connections: { RBXScriptConnection },
@@ -80,7 +79,6 @@ local function finishCelebration(player: Player, character: Model)
 	end
 
 	MinionService.releaseAllFollowers(player)
-	PlayerEnergyService.setEnergy(player, 0)
 
 	local respawnCFrame = getRespawnCFrame(player)
 	if respawnCFrame == nil then
